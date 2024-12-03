@@ -11,7 +11,7 @@ This repo contains a patch for the ICON release-2024.07. The patch includes miss
 ## Code to create this patch
 
 ```
-git clone git@gitlab.dkrz.de:icon/icon-model.git
+git clone -b release-2024.07-public git@gitlab.dkrz.de:icon/icon-model.git
 cd icon-model
 git remote add nwp git@gitlab.dkrz.de:icon/icon-nwp.git
 git fetch nwp
