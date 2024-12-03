@@ -7,3 +7,20 @@ This repo contains a patch for the ICON release-2024.07. The patch includes miss
 - [GPU port of `icpl_aero_gscp = 3` (MODIS climatology for cloud-droplet number)](https://gitlab.dkrz.de/icon/icon-nwp/-/commit/82bacb0f77789c5c004c22df2327aaddcd36e5ad)
 - [GPU port of HPBL output diagnostic](https://gitlab.dkrz.de/icon/icon-nwp/-/commit/395d65d06345c40ff1690997a6160c48fa6b563c)
 - [Cleanup in radiation and aerosol code parts](https://gitlab.dkrz.de/icon/icon-nwp/-/commit/1aa9faedeed9eb6fd334dbfe4740220880a5b130)
+
+## Code to create this patch
+
+```
+git clone git@gitlab.dkrz.de:icon/icon-model.git
+cd icon-model
+git remote add nwp git@gitlab.dkrz.de:icon/icon-nwp.git
+git fetch nwp
+git cherry-pick 2907e622f0aa57f588cdf9ca1e77817744cfb641 -X theirs
+git cherry-pick d2cf99cb78690339a62758db6259c4318adb3af5 -X theirs
+git cherry-pick 82bacb0f77789c5c004c22df2327aaddcd36e5ad -X theirs
+git cherry-pick 395d65d06345c40ff1690997a6160c48fa6b563c -X theirs
+git cherry-pick 1aa9faedeed9eb6fd334dbfe4740220880a5b130 -X theirs
+git reset --soft HEAD~5
+git commit -m "GPU patch for ICON-CLM"
+git format-patch -1 HEAD --stdout > ../icon-clm_2024.07_gpu.patch
+```
