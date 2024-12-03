@@ -1,21 +1,8 @@
-From ee4605ba2627d6d11296bccd94d302274d2f7c01 Mon Sep 17 00:00:00 2001
-From: Annika Lauber <annika.lauber@c2sm.ethz.ch>
-Date: Tue, 24 Sep 2024 12:45:42 +0000
-Subject: [PATCH 1/4] GPU port for transient aerosol datasets in ICON
+From 1ac91e3760a0b8c96051f3bbbd2452316d93b64e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michael=20J=C3=A4hn?= <mjaehn@ethz.ch>
+Date: Tue, 3 Dec 2024 10:39:39 +0100
+Subject: [PATCH] GPU patch for ICON-CLM
 
-See merge request icon/icon-nwp!1448
-
-For the ICON-CLM setup, time-variant (transient) aerosols based on the Kinne dataset need to be ported to GPU. This affects the following namelist switches:
-```
-irad_aero=12 (iRadAeroConstKinne)
-irad_aero=18 (iRadAeroKinneVolcSP)
-irad_aero=19 (iRadAeroKinneSP)
-```
-
-In addition, the CLM experiment is set up to run on levante.
-
-Approved-by: Marek Jacob <1129-b380572@users.noreply.gitlab.dkrz.de>
-Merged-by: Daniel Rieger <daniel.rieger@dwd.de>
 ---
  config/dkrz/levante.cpu.nvhpc-22.5            |   2 +-
  config/dkrz/levante.gpu.nvhpc-22.5            |   2 +-
@@ -23,31 +10,42 @@ Merged-by: Daniel Rieger <daniel.rieger@dwd.de>
  .../check.c2sm_clm_r13b03_seaice              |  30 +-
  run/checksuite.icon-dev/icon-dev.checksuite   |  31 +-
  run/create_target_header                      |   9 +
- run/exp.c2sm_clm_r13b03_seaice                |  55 +-
- run/tolerance/hashes/balfrin_cpu_nvidia       |  36 +-
+ run/exp.c2sm_clm_r13b03_seaice                |  53 +-
+ run/tolerance/hashes/balfrin_cpu_nvidia       |  35 +-
  run/tolerance/hashes/balfrin_cpu_nvidia_mixed |  28 +-
+ run/tolerance/pp.collect_selected_members     |  61 ++
  scripts/buildbot_scripts/create_list_merge2rc |   3 +-
  scripts/experiments/c2sm/clm_experiments.yml  |  22 +
  scripts/experiments/c2sm/clm_tests.yml        |  23 +
+ scripts/experiments/c2sm/mch_tests.yml        | 221 +++++
  src/atm_dyn_iconam/mo_nh_stepping.f90         |   2 +-
  src/atm_phy_bcs/mo_bc_aeropt_cmip6_volc.f90   | 332 ++++---
  src/atm_phy_bcs/mo_bc_aeropt_kinne.f90        | 376 ++++----
  src/atm_phy_bcs/mo_bc_aeropt_splumes.f90      | 561 +++++++-----
  src/atm_phy_nwp/mo_ecrad.f90                  |   4 +
- src/atm_phy_nwp/mo_nwp_aerosol.f90            | 235 +++--
- src/atm_phy_nwp/mo_nwp_ecrad_init.f90         |  12 +-
- src/atm_phy_nwp/mo_nwp_ecrad_interface.f90    | 253 +++---
+ src/atm_phy_nwp/mo_nwp_aerosol.f90            | 201 +++--
+ src/atm_phy_nwp/mo_nwp_diagnosis.f90          |  18 +-
+ src/atm_phy_nwp/mo_nwp_ecrad_init.f90         | 153 ++--
+ src/atm_phy_nwp/mo_nwp_ecrad_interface.f90    | 230 ++---
  src/atm_phy_nwp/mo_nwp_ecrad_prep_aerosol.f90 |  48 +-
  src/atm_phy_nwp/mo_nwp_gpu_util.f90           |   4 +-
- src/atm_phy_nwp/mo_nwp_phy_state.f90          |   3 +-
- src/atm_phy_nwp/mo_nwp_rad_interface.f90      |  47 +-
+ src/atm_phy_nwp/mo_nwp_gscp_interface.f90     |   3 +
+ src/atm_phy_nwp/mo_nwp_phy_init.f90           |   2 +-
+ src/atm_phy_nwp/mo_nwp_phy_state.f90          |  12 +-
+ src/atm_phy_nwp/mo_nwp_rad_interface.f90      |  38 +-
+ src/atm_phy_nwp/mo_nwp_rrtm_interface.f90     | 158 ++--
  src/atm_phy_nwp/mo_nwp_vdiff_sea.f90          |   2 +
+ src/atm_phy_nwp/mo_phys_nest_utilities.f90    |  91 +-
  .../mo_rte_rrtmgp_interface.f90               |  69 +-
+ src/atm_phy_schemes/mo_o3_util.f90            |  28 +-
+ src/configure_model/mo_nml_crosscheck.f90     |   3 -
  src/shared/mo_idx_list.f90                    |  10 +-
  src/shared/mo_latitude_interpolation.f90      |  35 +-
- 28 files changed, 1729 insertions(+), 1323 deletions(-)
+ 37 files changed, 2191 insertions(+), 1527 deletions(-)
+ create mode 100644 run/tolerance/pp.collect_selected_members
  create mode 100644 scripts/experiments/c2sm/clm_experiments.yml
  create mode 100644 scripts/experiments/c2sm/clm_tests.yml
+ create mode 100644 scripts/experiments/c2sm/mch_tests.yml
 
 diff --git a/config/dkrz/levante.cpu.nvhpc-22.5 b/config/dkrz/levante.cpu.nvhpc-22.5
 index 78740309a9..82742c2f0e 100755
@@ -76,7 +74,7 @@ index c286d6a4ef..aca6b11b94 100755
  # The compiler fails one of the YAC configure-time tests, which we suppress and
  # hope for the best:
 diff --git a/run/checksuite.clm/clmexp.ICON_CLM b/run/checksuite.clm/clmexp.ICON_CLM
-index 44331342de..a462d9bef0 100644
+index 44331342de..8cd3114188 100644
 --- a/run/checksuite.clm/clmexp.ICON_CLM
 +++ b/run/checksuite.clm/clmexp.ICON_CLM
 @@ -24,7 +24,7 @@
@@ -304,7 +302,7 @@ index 44331342de..a462d9bef0 100644
 +  output_filename              = '${EXPID}_out01'
 +  filename_format              = '<output_filename>_<datetime2>'
 +  operation                    = ""
-+  ml_varlist                   = 'alb_si','fr_seaice','t_g','aod_550nm' ! reduced list for buildbot
++  ml_varlist                   = 'alb_si','fr_seaice','t_g','aod_550nm','hpbl' ! reduced list for buildbot
 +  output_grid                  =  .TRUE.
  !	 stream_partitions_ml         =  2
 -	/
@@ -1092,9 +1090,18 @@ index 4a5fc8e92d..b0267abb71 100644
  
      # set more default values
 diff --git a/run/exp.c2sm_clm_r13b03_seaice b/run/exp.c2sm_clm_r13b03_seaice
-index d598d68118..f2f7adca27 100644
+index d598d68118..595e160f26 100644
 --- a/run/exp.c2sm_clm_r13b03_seaice
 +++ b/run/exp.c2sm_clm_r13b03_seaice
+@@ -76,7 +76,7 @@ atmo_namelist=NAMELIST_${EXPNAME}_atm
+ # Get required files together
+ # ========================
+ 
+-extpar_filename="external_parameter_icon_baltic_sea_DOM01_tiles.nc"
++extpar_filename="external_parameter_icon_baltic_sea_DOM01_tiles_cdnc.nc"
+ add_required_file "${grids_folder}/${extpar_filename}" ./
+ 
+ # files needed for radiation
 @@ -110,6 +110,47 @@ add_required_file ${latbc_path}/bc_greenhouse_rcp45_1765-2500.nc .
  add_required_file ${latbc_path}/LOWBC_1979_02.nc .
  add_required_file ${latbc_path}/LOWBC_1979_02.nc .
@@ -1143,38 +1150,27 @@ index d598d68118..f2f7adca27 100644
  # ===========================================================================
  # Create ICON master namelist
  # ==========================================================================
-@@ -212,7 +253,7 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
-   ltile_init                  = .TRUE.
-   ltile_coldstart             = .true.
-   pinit_seed                  = 0
--  pinit_amplitude             = 1e-14
-+  pinit_amplitude             = 0
- /
- 
- ! grid_nml: horizontal grid --------------------------------------------------
 @@ -335,8 +376,8 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
   efdt_min_raylfric  = 7200.
   itype_z0         = 2
   icapdcycl        = 3
 - icpl_aero_conv   = 1
 - icpl_aero_gscp   = 1
-+ icpl_aero_conv   = 0
-+ icpl_aero_gscp   = 0
++ icpl_aero_conv   = 0 
++ icpl_aero_gscp   = 3
   icpl_o3_tp       = 1
   iprog_aero       = 0
   dt_rad           = 2400
-@@ -359,6 +400,10 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
-  tune_rcucov = 0.075
-  tune_rhebc_land = 0.825
-  tune_gust_factor=7.0
-+ tune_eiscrit = 6.
-+ tune_sc_eis = 6.
-+ tune_sc_invmin = 100.
-+ tune_sc_invmax = 2500.
+@@ -386,7 +427,7 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
+   'ddt_temp_pconv','ddt_u_turb','ddt_u_sso','ddt_u_pconv','ddt_v_turb','ddt_v_sso',
+   'ddt_qv_turb','ddt_qc_turb','ddt_qv_conv','ddt_qc_conv','ddt_tke','ddt_tke_pconv','ddt_tke_hsh','qv_s',
+   'runoff_g','plantevap','t_snow','rho_snow','h_snow','freshsnow','ddt_vn_adv','ddt_vn_pgr','exner',
+-  'h_ice','t_ice','alb_si'
++  'h_ice','t_ice','alb_si','hpbl'
  /
  
- ! output_nml: control the output ------------------------------------------------ 
-@@ -399,8 +444,8 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
+ ! radiation_nml: radiation scheme ---------------------------------------------
+@@ -399,8 +440,8 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
    irad_n2o    = 4           ! 4: from greenhouse gas scenario
    irad_cfc11  = 4           ! 4: from greenhouse gas scenario
    irad_cfc12  = 4           ! 4: from greenhouse gas scenario
@@ -1186,10 +1182,10 @@ index d598d68118..f2f7adca27 100644
    direct_albedo = 4
    albedo_whitecap = 1
 diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia b/run/tolerance/hashes/balfrin_cpu_nvidia
-index cbaf5c8cc5..cad13dfdac 100644
+index cbaf5c8cc5..d46e5cc71f 100644
 --- a/run/tolerance/hashes/balfrin_cpu_nvidia
 +++ b/run/tolerance/hashes/balfrin_cpu_nvidia
-@@ -4,21 +4,21 @@
+@@ -4,21 +4,20 @@
  icon_data_rootFolder: /scratch/mch/jenkins/icon/pool/data/ICON
  builder: balfrin_cpu_nvidia
  # The list below maps each experiment to its current experiment_hash
@@ -1211,26 +1207,25 @@ index cbaf5c8cc5..cad13dfdac 100644
 -"mch_opr_r19b07_midnight": f0c49473e8cc5397e9a5ab171a8b19a7cef9f8cc
 -"mch_opr_r19b07_turb": 71b97d0738fbe73e96b20e1e2e566f592a0bfc35
 -"mch_pollen_test": 69480c7afdfe4cb4ca2b95d86fb58f03a2b295dd
-+"c2sm_clm_r13b03_seaice": 9fd5125a6b74a8c7a7074fd41a5b7750ff303ac1
-+"dwd_run_ICON_09_R2B4N5_EPS": 46a55885f52fc04e76038e717d451985f99aeb3a
-+"mch_ch_lowres": 42647448335af146c69e6d3d39de5a75f45d00c0
++"c2sm_clm_r13b03_seaice": 5e90302839fb503bbddee997a0d74042b42a80d7
++"mch_ch_lowres": fa586307a864e27c983a6930624a8945126aef97
 +"mch_ch_r04b09_dace": f9a89c3a58593808d6d1c831826978d30b7e9072
-+"mch_icon-ch1_small": 4fc448b0c06a291afd59c7f46517c776e878382f
-+"mch_icon-ch2_small": a0ba460c747d1bf0966bb8d09ec0dcedea594e94
-+"mch_kenda-ch1_dev2_small": 3724e9fc234ef18e8df7d1c3a5c52a159ebbd4a4
-+"mch_kenda-ch1_dev_small": 7e03087162564ac7ddf9fe844436ba3c22c431c9
-+"mch_kenda-ch1_small": 8b35a55203f5100fe364886801c79c2df689ddd3
-+"mch_opr_r04b07": f920ef95153118f55169a18e431be20845f24047
-+"mch_opr_r04b07_lhn_00": 197f409bcdd22389118f4e1690be6cce4964f8da
-+"mch_opr_r04b07_lhn_12_emvorado": a731b21cb4f850e81e740915dfcdbbf475859f46
-+"mch_opr_r04b07_nest": 6b0cad845573d9838edb4ed493acff6c50de4eac
-+"mch_opr_r04b07_sstice_inst": e9d23760ce396b8b526718d1b811bc79debb911f
-+"mch_opr_r19b07_lpi": 8b07776a2976be69a9b44352b9fdc6ad8af32103
-+"mch_opr_r19b07_midnight": 7f7a5d8991caf3a4d673e962dd4cea00fd417415
-+"mch_opr_r19b07_turb": fde1eb0b2083eb1a8a4c48e5da9fa3e86c512a18
-+"mch_pollen_test": f2e9c55626dadf3e83802f8d22d46697bd46286c
++"mch_icon-ch1_small": a8feb093cc3eb7a549d04ddab2024be8dc583695
++"mch_icon-ch2_small": 63085b0de00828999cc9fd99e8ae11b75c1c76af
++"mch_kenda-ch1_dev2_small": 10874495ad2f486a76677f6d542b8fdc13a4d237
++"mch_kenda-ch1_dev_small": de60838c35b794ee6c4f69fb4b6b96f17f70b5d6
++"mch_kenda-ch1_small": c9c633ed825f87b9bde8abc45f4bbd3a54b8bc09
++"mch_opr_r04b07": 174c502ef9b15a5d725f74690a820ea58e3234a7
++"mch_opr_r04b07_lhn_00": fa2ebc083ae7c0e98dc040cf3ee5910e10c351a7
++"mch_opr_r04b07_lhn_12_emvorado": 6d7521e484dd4cb91d392a075ff29cce755f86bd
++"mch_opr_r04b07_nest": c661c73ba3330d8a214c9623feb873356d790ecc
++"mch_opr_r04b07_sstice_inst": 9339f702e481442b1881c4a73a6d20eb3541e438
++"mch_opr_r19b07_lpi": 0fcfd0f6dbed76ffc13a8118426e5de96639edbf
++"mch_opr_r19b07_midnight": bf790f3bb36471981e17c947c33b8fa209a89e23
++"mch_opr_r19b07_turb": 3a34fa17db63e74c3b3bbba1a849daea8a72ee58
++"mch_pollen_test": fa0db7ad6c5ed86993f40303896ba89bb770f698
 diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-index aae0a1017f..abda4e18b5 100644
+index aae0a1017f..caa6077eb2 100644
 --- a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
 +++ b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
 @@ -4,17 +4,17 @@
@@ -1251,20 +1246,87 @@ index aae0a1017f..abda4e18b5 100644
 -"mch_opr_r19b07_midnight": 2abb919b2f423b5a367a69d6aa0989506bead420
 -"mch_opr_r19b07_turb": c85e1e8e9b485748f82b82ff3012e4e9b8e6b24c
 -"mch_pollen_test": b5248b6738f2f5aee24024aee66b47edd348bf84
-+"c2sm_clm_r13b03_seaice": b456a4d8e10187a365b3aa78cee932c99a2e16b5
-+"mch_ch_lowres": d419a94fdb6e1353e16af48e85290d7a5d19be9e
-+"mch_icon-ch1_small": 17e5e726d64b03a37564db2977567ebea45ac278
-+"mch_icon-ch2_small": 6a673dea1dfef6f347438371a2859d08c1774440
-+"mch_kenda-ch1_small": 1227aab850827c3bf115b43c62887db1310f9a6f
-+"mch_opr_r04b07": e7b4f1da538ec5c2a4670a31d42884728a127ded
-+"mch_opr_r04b07_lhn_00": 59d9532e83cc1a2338cc170e98f4e56cf6d392f3
-+"mch_opr_r04b07_lhn_12_emvorado": 8fcee2531ef205166686bfd6c91ae84584fffe32
-+"mch_opr_r04b07_nest": 7112c2b7c7c8ce7dd67bf2bac42234dcc59a65b9
-+"mch_opr_r04b07_sstice_inst": 171821f3235cb660d0cb202f31ce42f32a3f82e5
-+"mch_opr_r19b07_lpi": 4fea14f580da4f98368e334db9c066c0d65d9872
-+"mch_opr_r19b07_midnight": e0affabd714edef4815b89e049450bab5284eeee
-+"mch_opr_r19b07_turb": 541cbaf5a8548d74f335abe00b3858a95968f51a
-+"mch_pollen_test": b530b762ce22984d8f9e3628671b17619c48cfe8
++"c2sm_clm_r13b03_seaice": 0044fa8308dfd14933947cf929baae2207db7bc8
++"mch_ch_lowres": 908b533ec19a862ed492f32140be771b61f10c10
++"mch_icon-ch1_small": 7d691af6dbcaeb24a0523ffcdd9a5efb7da212b6
++"mch_icon-ch2_small": a7b843a5932341b168da5f7c3491dea1c10fcf64
++"mch_kenda-ch1_small": a13a6460ab656eecf8bb20929e3fcd990d35da29
++"mch_opr_r04b07": ae70b425b411d2bbae7af55546dbc3fe1a08a8a0
++"mch_opr_r04b07_lhn_00": 70d0ce788ba73ae30fc8902ac8315a5d06b05d6c
++"mch_opr_r04b07_lhn_12_emvorado": 3ecf290c663b1d91ecb057b890a04125a3e4db67
++"mch_opr_r04b07_nest": 59306497de70a77e472c45a529eef8c6fad246e2
++"mch_opr_r04b07_sstice_inst": 028149427c74159f76a372c89353fccb561aff6d
++"mch_opr_r19b07_lpi": 32b4bbbea0d03be8a51e1b0ef2e22cf0e3a17d7a
++"mch_opr_r19b07_midnight": c67ddc1291d2ab669ca0bc290dd5dbeeabd77e08
++"mch_opr_r19b07_turb": c6e1d37341c0e37694e3ac4d23b2ccddee2ab9ca
++"mch_pollen_test": 3c959a9199669b43abb1366a1f15e8b768f7a8f0
+diff --git a/run/tolerance/pp.collect_selected_members b/run/tolerance/pp.collect_selected_members
+new file mode 100644
+index 0000000000..96986c2f5f
+--- /dev/null
++++ b/run/tolerance/pp.collect_selected_members
+@@ -0,0 +1,61 @@
++#!/bin/bash
++
++# ICON
++#
++# ------------------------------------------
++# Copyright (C) 2004-2024, DWD, MPI-M, DKRZ, KIT, ETH, MeteoSwiss
++# Contact information: icon-model.org
++# See AUTHORS.TXT for a list of authors
++# See LICENSES/ for license information
++# SPDX-License-Identifier: BSD-3-Clause
++# ------------------------------------------
++
++set -euo pipefail
++
++# This script runs the member selection for probtest
++
++
++# Variables passed via list_probtest -> addexp/runexp -> create_target_header
++#
++# tolerance_experiments : comma separated list of experiments
++# basedir : the directory where ICON has been build in.
++
++# make sure the resulting data and directories are global readable
++umask 0022
++
++# generating iterable array of builders
++IFS=',' read -ra experiments <<< "${tolerance_experiments}"
++
++# Sort experiments in alphabetic order
++sorted_experiments=($(for exp in "${experiments[@]}"; do echo $exp; done | sort))
++
++# Please don't change these path/file names. They are used by buildbot.
++yaml_path=scripts/experiments
++
++# Update the selected members in the corresponding file 
++echo ""
++echo "Please update or add the following lines with the selected members and the "
++echo "tolerance factor (if not the default value of 5) to the corresponding experiment "
++echo "in '${yaml_path}/<group>/<test-type>_tests.yml'."
++echo "If any of the experiments is not yet in the list, please add it in alphabetical order."
++echo ""
++for exp in "${sorted_experiments[@]}"; do
++    if [ -f "${basedir}/${exp}_selected_members.csv" ]; then
++        selected_members=$(sed -n '1p' "${basedir}/${exp}_selected_members.csv")
++        export_factor=$(sed -n '2p' "${basedir}/${exp}_selected_members.csv")
++        # Extract the factor from the second line
++        factor=$(echo "$export_factor" | grep -oE '[0-9]+')
++        echo "- name: ${exp}"
++        echo "  ensemble_num:"
++        echo "    - ${BB_NAME}: $selected_members"
++        echo "  tolerance_factor:"
++        echo "    - ${BB_SYSTEM}: $factor"
++        echo ""
++    else
++        echo "WARNING: The member selection failed for ${exp}."
++        echo ""
++    fi
++done
++
++# exit 0 on success (and don't execute any appended scripts)
++exit 0
 diff --git a/scripts/buildbot_scripts/create_list_merge2rc b/scripts/buildbot_scripts/create_list_merge2rc
 index 3c0f8a8a1e..0af3e100dc 100755
 --- a/scripts/buildbot_scripts/create_list_merge2rc
@@ -1336,6 +1398,233 @@ index 0000000000..b68b70cb9a
 +      - balfrin_cpu_nvidia_mixed: [37,6,17,31,18,41,28,43,40]
 +    tolerance_factor:
 +      - balfrin: 10
+diff --git a/scripts/experiments/c2sm/mch_tests.yml b/scripts/experiments/c2sm/mch_tests.yml
+new file mode 100644
+index 0000000000..aec987831c
+--- /dev/null
++++ b/scripts/experiments/c2sm/mch_tests.yml
+@@ -0,0 +1,221 @@
++# ICON
++#
++# ------------------------------------------
++# Copyright (C) 2004-2024, DWD, MPI-M, DKRZ, KIT, ETH, MeteoSwiss
++# Contact information: icon-model.org
++# See AUTHORS.TXT for a list of authors
++# See LICENSES/ for license information
++# SPDX-License-Identifier: BSD-3-Clause
++# ------------------------------------------
++
++tests:
++  - name: mch_ch_lowres
++    tags: ['atm', 'merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [25,12,13,20,19]
++      - balfrin_cpu_nvidia_mixed: [1,30,35,44,13,14]
++  - name: mch_ch_r04b09_dace
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_cpu_nvidia', 'balfrin_gpu_nvidia']
++    refgen: ['balfrin_cpu_nvidia']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num: # Use 1 ensemble member as the tolerances are 0
++      - balfrin_cpu_nvidia: [1]
++  - name: mch_ch_r04b09_dace_synsat
++    tags: ['atm','merge2rc','probtest']
++    checksuite_modes:
++        - horeka: 't'
++    machines:
++      - name: horeka
++        include_only: ['horeka_cpu_nvhpc','horeka_gpu_nvhpc']
++    refgen: ['horeka_cpu_nvhpc']
++    ensemble_num:
++      - horeka_cpu_nvhpc: [25,12,13,20,19]
++  - name: mch_kenda-ch1_small
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 'tc'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [11,9,44,46,13]
++      - balfrin_cpu_nvidia_mixed: [26,4,15,50,47,46]
++    tolerance_factor:
++      - balfrin: 5
++  - name: mch_pollen_test
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [25,12,13,20,19]
++      - balfrin_cpu_nvidia_mixed: [18,7,49,45,28]
++  - name: mch_icon-ch1
++    tags: ['mch-opr']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_gpu_nvidia_mixed', 'alps_mch_test_gpu']
++        runflags: ['cpu_time=02:00:00']
++    checksuite_modes:
++      - balfrin: 'pg'
++  - name: mch_icon-ch1_small
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [50,21,39,38,15]
++      - balfrin_cpu_nvidia_mixed: [50,21,40,39,16]
++  - name: mch_icon-ch2
++    tags: ['mch-opr']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_gpu_nvidia_mixed', 'alps_mch_test_gpu']
++        runflags: ['cpu_time=01:20:00']
++    checksuite_modes:
++      - balfrin: 'p'
++  - name: mch_icon-ch2_small
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 'tg'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [25,46,27,32,4]
++      - balfrin_cpu_nvidia_mixed: [36,34,1,26,11,22,16,13]
++  - name: mch_kenda-ch1
++    tags: ['mch-opr']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_gpu_nvidia_mixed', 'alps_mch_test_gpu']
++        runflags: ['cpu_time=00:20:00']
++    checksuite_modes:
++      - balfrin: 'p'
++  - name: mch_opr_r04b07
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [18,48,43,37,32,25]
++      - balfrin_cpu_nvidia_mixed: [32,11,18,20,24,46,47]
++  - name: mch_opr_r04b07_lhn_00
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [19,43,31,1,25,33,20,4,7,2,50,5,46,30,3]
++      - balfrin_cpu_nvidia_mixed: [21,27,13,37,24,50,49,12,11]
++    tolerance_factor:
++      - balfrin: 10
++  - name: mch_opr_r04b07_lhn_12_emvorado
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    checksuite_modes:
++      - balfrin: 't'
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    ensemble_num:
++      - balfrin_cpu_nvidia: [36,2,28,40,25,27,18,34,33,47,9]
++      - balfrin_cpu_nvidia_mixed: [13,42,47,24,11,28,45,1,8,17,3,49,39,20,46]
++    tolerance_factor:
++      - balfrin: 10
++  - name: mch_opr_r04b07_nest
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 'rt'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [17,9,49,46,28]
++      - balfrin_cpu_nvidia_mixed: [38,22,48,19,37]
++    tolerance_factor:
++      - balfrin: 5
++  - name: mch_opr_r04b07_performance
++    tags: ['atm','merge2rc']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_gpu_nvidia_mixed']
++    checksuite_modes:
++      - balfrin: 'p'
++  - name: mch_opr_r04b07_sstice_inst
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [25,12,13,20,19]
++      - balfrin_cpu_nvidia_mixed: [50,20,40,39,15]
++  - name: mch_opr_r19b07_lpi
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [25,42,14,45,47,46,23,39,17]
++      - balfrin_cpu_nvidia_mixed: [14,48,33,45,35,31,39,6,8,13,38,7,21,32]
++  - name: mch_opr_r19b07_midnight
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
++    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 't'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [29,46,32,35,4]
++      - balfrin_cpu_nvidia_mixed: [26,39,25,5,35,6,3,47]
++  - name: mch_opr_r19b07_turb
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++    checksuite_modes:
++      - balfrin: 't'
++    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
++    ensemble_num:
++      - balfrin_cpu_nvidia: [20,9,49,46,28]
++      - balfrin_cpu_nvidia_mixed: [17,38,7,24,23,21,50]
++  - name: mch_kenda-ch1_dev_small
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_cpu_nvidia', 'balfrin_gpu', 'alps_mch_test_cpu', 'alps_mch_test_gpu']
++    refgen: ['balfrin_cpu_nvidia', 'alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 'tc'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [18,46,37,23,28]
++  - name: mch_kenda-ch1_dev2_small
++    tags: ['atm','merge2rc','probtest']
++    machines:
++      - name: balfrin
++        include_only: ['balfrin_cpu_nvidia', 'balfrin_gpu', 'alps_mch_test_cpu', 'alps_mch_test_gpu']
++    refgen: ['balfrin_cpu_nvidia', 'alps_mch_test_cpu']
++    checksuite_modes:
++      - balfrin: 'tc'
++    ensemble_num:
++      - balfrin_cpu_nvidia: [26,28,48,29,46]
 diff --git a/src/atm_dyn_iconam/mo_nh_stepping.f90 b/src/atm_dyn_iconam/mo_nh_stepping.f90
 index cff2fe650c..0fa950bc75 100644
 --- a/src/atm_dyn_iconam/mo_nh_stepping.f90
@@ -3232,33 +3521,10 @@ index b285f775f9..514e81f174 100644
      ENDIF
    END SUBROUTINE del_opt_ptrs
 diff --git a/src/atm_phy_nwp/mo_nwp_aerosol.f90 b/src/atm_phy_nwp/mo_nwp_aerosol.f90
-index 1b91fd2ad8..80ba5090ee 100644
+index 1b91fd2ad8..e13aa84186 100644
 --- a/src/atm_phy_nwp/mo_nwp_aerosol.f90
 +++ b/src/atm_phy_nwp/mo_nwp_aerosol.f90
-@@ -1,8 +1,3 @@
--!
--! This module prepares aerosol for the use in radiation
--!
--!
--!
- ! ICON
- !
- ! ---------------------------------------------------------------
-@@ -14,6 +9,8 @@
- ! SPDX-License-Identifier: BSD-3-Clause
- ! ---------------------------------------------------------------
- 
-+! This module prepares aerosol for the use in radiation
-+
- !----------------------------
- #include "omp_definitions.inc"
- !----------------------------
-@@ -32,14 +29,16 @@ MODULE mo_nwp_aerosol
-   USE mo_impl_constants,          ONLY: min_rlcell_int, SUCCESS, &
-                                     &   iss, iorg, ibc, iso4, idu, n_camsaermr
-   USE mo_impl_constants_grf,      ONLY: grf_bdywidth_c
--  USE mo_physical_constants,      ONLY: rd, grav, cpd
-+  USE mo_physical_constants,      ONLY: rd, grav, cpd, rdv, o_m_rdv
+@@ -36,7 +36,7 @@ MODULE mo_nwp_aerosol
    USE mo_reader_cams,             ONLY: t_cams_reader
    USE mo_interpolate_time,        ONLY: t_time_intp, intModeLinearMonthlyClim, intModeLinear
    USE mo_io_units,                ONLY: filename_max
@@ -3267,12 +3533,7 @@ index 1b91fd2ad8..80ba5090ee 100644
    USE mo_util_string,             ONLY: int2string, associate_keyword, t_keyword_list, with_keywords
  ! ICON configuration
    USE mo_atm_phy_nwp_config,      ONLY: atm_phy_nwp_config, iprog_aero, icpl_aero_conv
-+  USE mo_run_config,              ONLY: iqv
-+  USE mo_satad,                   ONLY: sat_pres_water
-   USE mo_radiation_config,        ONLY: irad_aero, iRadAeroConstKinne, iRadAeroKinne, iRadAeroCAMSclim,     &
-                                     &   iRadAeroCAMStd, iRadAeroVolc, iRadAeroKinneVolc, iRadAeroART, &
-                                     &   iRadAeroKinneVolcSP, iRadAeroKinneSP, iRadAeroTegen,                &
-@@ -152,7 +151,7 @@ CONTAINS
+@@ -152,7 +152,7 @@ CONTAINS
      REAL(wp), POINTER, INTENT(in) :: &
        &  wavenum1_sw(:),       & !< Shortwave wavenumber lower band bounds
        &  wavenum2_sw(:)          !< Shortwave wavenumber upper band bounds
@@ -3281,7 +3542,7 @@ index 1b91fd2ad8..80ba5090ee 100644
        &  zaeq1(:,:,:),         & !< Tegen optical thicknesses       1: continental
        &  zaeq2(:,:,:),         & !< relative to 550 nm, including   2: maritime
        &  zaeq3(:,:,:),         & !< a vertical profile              3: desert
-@@ -196,7 +195,7 @@ CONTAINS
+@@ -196,7 +196,7 @@ CONTAINS
      jg     = pt_patch%id
  
      CALL set_acc_host_or_device(lzacc, lacc)
@@ -3290,7 +3551,7 @@ index 1b91fd2ad8..80ba5090ee 100644
      SELECT CASE(irad_aero)
  !---------------------------------------------------------------------------------------
  ! Tegen aerosol (+ART if chosen)
-@@ -205,6 +204,13 @@ CONTAINS
+@@ -205,6 +205,13 @@ CONTAINS
  
          !$ACC DATA CREATE(latitude) IF(lzacc)
  
@@ -3304,7 +3565,7 @@ index 1b91fd2ad8..80ba5090ee 100644
          ! Outer two rows need dummy values as RRTM always starts at 1
          rl_start   = 1
          rl_end     = 2
-@@ -224,7 +230,7 @@ CONTAINS
+@@ -224,7 +231,7 @@ CONTAINS
                zaeq3(jc,jk,jb) = 0._wp
                zaeq4(jc,jk,jb) = 0._wp
                zaeq5(jc,jk,jb) = 0._wp
@@ -3313,18 +3574,6 @@ index 1b91fd2ad8..80ba5090ee 100644
            ENDDO
            !$ACC END PARALLEL
          ENDDO
-@@ -252,8 +258,9 @@ CONTAINS
-           ENDDO
-           !$ACC END PARALLEL
- 
--          CALL nwp_aerosol_tegen(i_startidx, i_endidx, pt_patch%nlev, pt_patch%nlevp1, &
--            &                    prm_diag%k850(:,jb), pt_diag%temp(:,:,jb), pt_diag%pres(:,:,jb), pt_diag%pres_ifc(:,:,jb), &
-+          CALL nwp_aerosol_tegen(i_startidx, i_endidx, pt_patch%nlev, pt_patch%nlevp1, prm_diag%k850(:,jb), &
-+            &                    pt_diag%temp(:,:,jb), pt_diag%pres(:,:,jb),                              &
-+            &                    pt_diag%pres_ifc(:,:,jb),  prm_diag%tot_cld(:,:,jb,iqv),                 &
-             &                    ext_data%atm_td%aer_ss(:,jb,imo1),   ext_data%atm_td%aer_org(:,jb,imo1), &
-             &                    ext_data%atm_td%aer_bc(:,jb,imo1),   ext_data%atm_td%aer_so4(:,jb,imo1), &
-             &                    ext_data%atm_td%aer_dust(:,jb,imo1), ext_data%atm_td%aer_ss(:,jb,imo2),  &
 @@ -359,16 +366,6 @@ CONTAINS
  !---------------------------------------------------------------------------------------
        CASE(iRadAeroConstKinne, iRadAeroKinne, iRadAeroVolc, iRadAeroKinneVolc, iRadAeroKinneVolcSP, iRadAeroKinneSP)
@@ -3582,67 +3831,7 @@ index 1b91fd2ad8..80ba5090ee 100644
  
    END SUBROUTINE nwp_aerosol_kinne
  
-@@ -926,7 +982,7 @@ CONTAINS
- 
-   END SUBROUTINE cams_forecast_prep
-   !---------------------------------------------------------------------------------------
--  SUBROUTINE nwp_aerosol_tegen ( istart, iend, nlev, nlevp1, k850, temp, pres, pres_ifc,                 &
-+  SUBROUTINE nwp_aerosol_tegen ( istart, iend, nlev, nlevp1, k850, temp, pres, pres_ifc, qv,             &
-     &                            aer_ss_mo1, aer_org_mo1, aer_bc_mo1, aer_so4_mo1, aer_dust_mo1,         &
-     &                            aer_ss_mo2, aer_org_mo2, aer_bc_mo2, aer_so4_mo2, aer_dust_mo2,         &
-     &                            pref_aerdis,latitude, dpres_mc, time_weight,                            &
-@@ -939,7 +995,7 @@ CONTAINS
-       &  k850(:)                             !< Index of 850 hPa layer
-     REAL(wp), INTENT(in)                :: &
-       &  temp(:,:), pres(:,:),             & !< temperature and pressure at full level
--      &  pres_ifc(:,:),                    & !< pressure at half level
-+      &  pres_ifc(:,:), qv(:,:),           & !< pressure at half level, specific humidity
-       &  aer_ss_mo1(:), aer_org_mo1(:),    & !< Month 1 climatology from extpar file (sea salt, organic)
-       &  aer_bc_mo1(:), aer_so4_mo1(:),    & !< Month 1 climatology from extpar file (blck carbon, sulphate)
-       &  aer_dust_mo1(:),                  & !< Month 1 climatology from extpar file (dust)
-@@ -977,7 +1033,7 @@ CONTAINS
-       &  zaeqso (nproma), zaeqsn,          &
-       &  zptrop (nproma), zdtdz(nproma),   &
-       &  zlatfac(nproma), zstrfac,         &
--      &  zpblfac, zslatq
-+      &  zpblfac, zslatq, tunefac_pbl, rh, humidity_fac
-     REAL(wp), PARAMETER                 :: &
-       & ztrbga = 0.03_wp  / (101325.0_wp - 19330.0_wp), &
-       ! original value for zstbga of 0.045 is much higher than recently published climatologies
-@@ -987,6 +1043,9 @@ CONTAINS
-     LOGICAL                             :: &
-       &  lzacc                               !< non-optional version of lacc
- 
-+    ! increase aerosol enhancement in stable PBLs with prognostic aersosol
-+    tunefac_pbl = MERGE(1._wp, 2._wp, iprog_aero <= 1)
-+
-     CALL set_acc_host_or_device(lzacc, lacc)
- 
-     !$ACC DATA CREATE(zsign, zvdaes, zvdael, zvdaeu, zvdaed) &
-@@ -1077,7 +1136,7 @@ CONTAINS
-     !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
-     !$ACC LOOP SEQ
-     DO jk = 1,nlev
--      !$ACC LOOP GANG VECTOR PRIVATE(zaeqsn, zaeqln, zaeqsun, zaequn, zaeqdn, zstrfac, zpblfac)
-+      !$ACC LOOP GANG VECTOR PRIVATE(zaeqsn, zaeqln, zaeqsun, zaequn, zaeqdn, zstrfac, zpblfac, rh, humidity_fac)
-       DO jc = istart, iend
-         zaeqsn  = zvdaes(jc,jk+1) * aerosol(jc,iss)
-         zaeqln  = zvdael(jc,jk+1) * aerosol(jc,iorg)
-@@ -1087,8 +1146,11 @@ CONTAINS
- 
-         ! stratosphere factor: 1 in stratosphere, 0 in troposphere, width of transition zone 0.1*p_TP
-         zstrfac = MIN(1._wp,MAX(0._wp,10._wp*(zptrop(jc)-pres(jc,jk))/zptrop(jc)))
--        ! PBL stability factor; enhance organic, sulfate and black carbon aerosol for stable stratification
--        zpblfac = 1._wp + MIN(1.5_wp,1.e2_wp*MAX(0._wp, zdtdz(jc) + grav/cpd))
-+        ! PBL stability factor; enhance organic, sulfate and black carbon aerosol for stable stratification;
-+        ! account for particle growth in nearly saturated air
-+        rh = qv(jc,jk)*pres(jc,jk)/((rdv+o_m_rdv*qv(jc,jk))*sat_pres_water(temp(jc,jk)))
-+        humidity_fac = MERGE(0._wp, 20._wp*MAX(0._wp,rh-0.8_wp), iprog_aero <= 1)
-+        zpblfac = 1._wp + tunefac_pbl*MIN(1.5_wp,1.e2_wp*MAX(0._wp, zdtdz(jc) + grav/cpd)) + humidity_fac
- 
-         zaeq1(jc,jk) = (1._wp-zstrfac)*MAX(zpblfac*(zaeqln-zaeqlo(jc)), ztrbga*zlatfac(jc)*dpres_mc(jc,jk))
-         zaeq2(jc,jk) = (1._wp-zstrfac)*(zaeqsn-zaeqso(jc))
-@@ -1175,31 +1237,71 @@ CONTAINS
+@@ -1175,31 +1231,71 @@ CONTAINS
    END SUBROUTINE get_time_intp_weights
  
    !---------------------------------------------------------------------------------------
@@ -3715,16 +3904,341 @@ index 1b91fd2ad8..80ba5090ee 100644
        DEALLOCATE(g_sw, STAT=istat)
        IF(istat /= SUCCESS) CALL finish(routine, 'Deallocation of g_sw failed.')
      ENDIF
-@@ -1207,4 +1309,3 @@ CONTAINS
+@@ -1207,4 +1303,3 @@ CONTAINS
    END SUBROUTINE nwp_aerosol_cleanup
  
  END MODULE mo_nwp_aerosol
 -
+diff --git a/src/atm_phy_nwp/mo_nwp_diagnosis.f90 b/src/atm_phy_nwp/mo_nwp_diagnosis.f90
+index 3e5a408a1c..7f9e08d108 100644
+--- a/src/atm_phy_nwp/mo_nwp_diagnosis.f90
++++ b/src/atm_phy_nwp/mo_nwp_diagnosis.f90
+@@ -1432,8 +1432,8 @@ CONTAINS
+ 
+     IF (ltimer) CALL timer_start(timer_nh_diagnostics)
+ 
+-    !$ACC DATA CREATE(ztp, zqp, mlab) PRESENT(p_metrics, pt_prog_rcf, pt_diag) &
+-    !$ACC   PRESENT(lnd_diag, p_prog_wtr_now, ext_data, prm_diag) IF(lzacc)
++    !$ACC DATA CREATE(ztp, zqp, mlab, ri_no) PRESENT(p_metrics, pt_prog_rcf, pt_diag) &
++    !$ACC   PRESENT(lnd_diag, p_prog_wtr_now, ext_data, pt_prog, prm_diag) IF(lzacc)
+ 
+     i_nchdom  = MAX(1,pt_patch%n_childdom)
+     jg        = pt_patch%id
+@@ -1645,18 +1645,16 @@ CONTAINS
+       !  atm_phy_les/mo_turbulent_diagnostic.f90
+ 
+        IF (var_in_output(jg)%hpbl) THEN
+-
+-#ifdef _OPENACC
+-         CALL finish(routine, 'PBL diagnosis not ported to GPU.')
+-#endif
+-
++        !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
++        !$ACC LOOP GANG(STATIC: 1) VECTOR
+         DO jc = i_startidx, i_endidx
+          ri_no(jc,nlev) = missing_value_hpbl
+         ENDDO
+ 
+-
++        !$ACC LOOP SEQ
+         DO jk = nlev-1, kstart_moist, -1
+-         DO jc = i_startidx, i_endidx
++          !$ACC LOOP GANG(STATIC: 1) VECTOR
++          DO jc = i_startidx, i_endidx
+ 
+             ri_no(jc,jk) = (grav/pt_prog%theta_v(jc,nlev,jb)) * &
+               &      ( pt_prog%theta_v(jc,jk,jb)-pt_prog%theta_v(jc,nlev,jb) ) *  &
+@@ -1674,7 +1672,7 @@ CONTAINS
+ 
+           END DO
+         END DO
+-
++        !$ACC END PARALLEL
+       ENDIF
+ 
+ 
 diff --git a/src/atm_phy_nwp/mo_nwp_ecrad_init.f90 b/src/atm_phy_nwp/mo_nwp_ecrad_init.f90
-index 262d493240..8dda39f2b9 100644
+index 262d493240..1803c213a9 100644
 --- a/src/atm_phy_nwp/mo_nwp_ecrad_init.f90
 +++ b/src/atm_phy_nwp/mo_nwp_ecrad_init.f90
-@@ -418,12 +418,17 @@ CONTAINS
+@@ -7,11 +7,8 @@
+ ! - ICON namelist settings are translated to ecRad conform settings, if unsupported values
+ !   are provided via namelist, the user gets an error. (These values should already be
+ !   checked by the nml_crosscheck)
+-! - Currently, only the McICA Solver is supported.
+ ! - Please note that only a subset of the available configuration options of ecRad is
+-!   filled by this routine. E.g., options only connected to the SPARTACUS Solver are
+-!   currently not changed from the default as the SPARTACUS Solver was not tested in
+-!   ICON so far. For a full list of ecRad settings, please have a look at
++!   filled by this routine. For a full list of ecRad settings, please have a look at
+ !   externals/ecrad/radiation/radiation_config.F90
+ !
+ !
+@@ -34,36 +31,35 @@
+ MODULE mo_nwp_ecrad_init
+ 
+   USE mo_kind,                 ONLY: wp
+-  USE mo_exception,            ONLY: finish, message, message_text
+-  USE mtime,                   ONLY: datetime
+-  USE mo_model_domain,         ONLY: t_patch
+-  USE mo_radiation_config,     ONLY: icld_overlap, irad_aero, ecrad_data_path,           &
+-                                 &   ecrad_isolver, ecrad_igas_model, isolrad,           &
+-                                 &   ecrad_llw_cloud_scat, ecrad_iliquid_scat,           &
+-                                 &   ecrad_iice_scat, ecrad_isnow_scat,                  &
+-                                 &   ecrad_irain_scat, ecrad_igraupel_scat,              &
+-                                 &   ecrad_use_general_cloud_optics,                     &
+-                                 &   iRadAeroConst, iRadAeroTegen, iRadAeroART,          &
+-                                 &   iRadAeroConstKinne, iRadAeroKinne, iRadAeroVolc,    &
+-                                 &   iRadAeroKinneVolc,  iRadAeroKinneVolcSP,            &
+-                                 &   iRadAeroKinneSP, iRadAeroNone,                      &
++  USE mo_exception,            ONLY: finish, message
++  USE mo_radiation_config,     ONLY: icld_overlap, irad_aero, ecrad_data_path,             &
++                                 &   ecrad_isolver, ecrad_igas_model, isolrad,             &
++                                 &   ecrad_llw_cloud_scat, ecrad_iliquid_scat,             &
++                                 &   ecrad_iice_scat, ecrad_isnow_scat,                    &
++                                 &   ecrad_irain_scat, ecrad_igraupel_scat,                &
++                                 &   ecrad_use_general_cloud_optics,                       &
++                                 &   iRadAeroConst, iRadAeroTegen, iRadAeroART,            &
++                                 &   iRadAeroConstKinne, iRadAeroKinne, iRadAeroVolc,      &
++                                 &   iRadAeroKinneVolc,  iRadAeroKinneVolcSP,              &
++                                 &   iRadAeroKinneSP, iRadAeroNone,                        &
+                                  &   iRadAeroCAMSclim, iRadAeroCAMStd
+ #ifdef __ECRAD
+-  USE mo_ecrad,                ONLY: t_ecrad_conf, ecrad_setup,                          &
+-                                 &   ISolverHomogeneous, ISolverMcICA, ISolverMcICAACC, ISolverSpartacus, &
+-                                 &   ISolverTripleclouds, ISolverCloudless,              &
+-                                 &   IGasModelMonochromatic, IGasModelIFSRRTMG,          &
+-                                 &   IGasModelECCKD,                                     &
+-                                 &   ILiquidModelMonochromatic, ILiquidModelSOCRATES,    &
+-                                 &   ILiquidModelSlingo, IIceModelMonochromatic,         &
+-                                 &   IIceModelFu, IIceModelBaran,                        &
+-                                 &   IIceModelBaran2016, IIceModelBaran2017, IIceModelYi,&
+-                                 &   IOverlapMaximumRandom, IOverlapExponentialRandom,   &
+-                                 &   IOverlapExponential,                                &
+-                                 &   nweight_nir_ecrad, iband_nir_ecrad, weight_nir_ecrad,&
+-                                 &   nweight_vis_ecrad, iband_vis_ecrad, weight_vis_ecrad,&
+-                                 &   nweight_par_ecrad, iband_par_ecrad, weight_par_ecrad,&
+-                                 &   ecrad_hyd_list,                                     &   
++  USE mo_ecrad,                ONLY: t_ecrad_conf, ecrad_setup,                            &
++                                 &   ISolverHomogeneous, ISolverMcICA, ISolverMcICAACC,    &
++                                 &   ISolverSpartacus,                                     &
++                                 &   ISolverTripleclouds, ISolverCloudless,                &
++                                 &   IGasModelMonochromatic, IGasModelIFSRRTMG,            &
++                                 &   IGasModelECCKD,                                       &
++                                 &   ILiquidModelMonochromatic, ILiquidModelSOCRATES,      &
++                                 &   ILiquidModelSlingo, IIceModelMonochromatic,           &
++                                 &   IIceModelFu, IIceModelBaran,                          &
++                                 &   IIceModelBaran2016, IIceModelBaran2017, IIceModelYi,  &
++                                 &   IOverlapMaximumRandom, IOverlapExponentialRandom,     &
++                                 &   IOverlapExponential,                                  &
++                                 &   nweight_nir_ecrad, iband_nir_ecrad, weight_nir_ecrad, &
++                                 &   nweight_vis_ecrad, iband_vis_ecrad, weight_vis_ecrad, &
++                                 &   nweight_par_ecrad, iband_par_ecrad, weight_par_ecrad, &
++                                 &   ecrad_hyd_list,                                       &
+                                  &   ecrad_iqc, ecrad_iqi, ecrad_iqr, ecrad_iqs, ecrad_iqg
+ #endif
+ 
+@@ -83,16 +79,12 @@ CONTAINS
+ 
+ 
+   !---------------------------------------------------------------------------------------
+-  SUBROUTINE setup_ecrad ( p_patch, ecrad_conf, ini_date )
++  SUBROUTINE setup_ecrad ( ecrad_conf )
+ 
+     CHARACTER(len=*), PARAMETER :: routine = modname//'::setup_ecrad'
+ 
+-    TYPE(t_patch),TARGET,INTENT(in)    :: &
+-      &  p_patch
+     TYPE(t_ecrad_conf),  INTENT(inout) :: &
+       &  ecrad_conf                         !< ecRad configuration state
+-    TYPE(datetime), POINTER            :: &
+-      &  ini_date                           !< current datetime (mtime)
+ 
+     ! Local variables
+     REAL(wp)                  :: &
+@@ -103,7 +95,7 @@ CONTAINS
+       &  i_band_in_lw(1),        & !< The emissivity band indices corresponding to each interval
+       &  cc_cloud                  !< counter for cloud_types
+ 
+-    CALL message('', 'Setup of ecRad')
++    CALL message(routine, 'Setup of ecRad radiation')
+ 
+     !---------------------------------------------------------------------------------------
+     ! Checks
+@@ -131,7 +123,7 @@ CONTAINS
+       CASE (5)
+         ecrad_conf%i_overlap_scheme = IOverlapExponential
+       CASE DEFAULT
+-        CALL finish(routine, 'Only values of 1 (MAX-RAN), 2 (EXP-RAN) and 5 (EXP) are valid for icld_overlap')
++        CALL finish(routine, 'Only icld_overlap values of 1 (MAX-RAN), 2 (EXP-RAN) and 5 (EXP) are valid for ecRad')
+     END SELECT
+ 
+     ! Aerosol climatology
+@@ -154,21 +146,21 @@ CONTAINS
+     ! Radiation solver
+     SELECT CASE (ecrad_isolver)
+       CASE(0)
+-        ecrad_conf%i_solver_sw  = ISolverMcICA !< Short-wave solver
+-        ecrad_conf%i_solver_lw  = ISolverMcICA !< Long-wave solver
+-        ecrad_conf%do_3d_effects = .false.     !< Do we include 3D effects?
++        ecrad_conf%i_solver_sw   = ISolverMcICA        !< Short-wave solver
++        ecrad_conf%i_solver_lw   = ISolverMcICA        !< Long-wave solver
++        ecrad_conf%do_3d_effects = .false.             !< Do we include 3D effects?
+       CASE(1)
+-        ecrad_conf%i_solver_sw  = ISolverTripleclouds !< Short-wave solver
+-        ecrad_conf%i_solver_lw  = ISolverTripleclouds !< Long-wave solver
+-        ecrad_conf%do_3d_effects = .false.     !< Do we include 3D effects?
++        ecrad_conf%i_solver_sw   = ISolverTripleclouds !< Short-wave solver
++        ecrad_conf%i_solver_lw   = ISolverTripleclouds !< Long-wave solver
++        ecrad_conf%do_3d_effects = .false.             !< Do we include 3D effects?
+       CASE(2)
+-        ecrad_conf%i_solver_sw  = ISolverMcICAACC !< Short-wave solver
+-        ecrad_conf%i_solver_lw  = ISolverMcICAACC !< Long-wave solver
+-        ecrad_conf%do_3d_effects = .false.     !< Do we include 3D effects?
++        ecrad_conf%i_solver_sw   = ISolverMcICAACC     !< Short-wave solver
++        ecrad_conf%i_solver_lw   = ISolverMcICAACC     !< Long-wave solver
++        ecrad_conf%do_3d_effects = .false.             !< Do we include 3D effects?
+       CASE(3)
+-        ecrad_conf%i_solver_sw  = ISolverSpartacus !< Short-wave solver
+-        ecrad_conf%i_solver_lw  = ISolverSpartacus !< Long-wave solver
+-        ecrad_conf%do_3d_effects = .true.     !< Do we include 3D effects?
++        ecrad_conf%i_solver_sw   = ISolverSpartacus    !< Short-wave solver
++        ecrad_conf%i_solver_lw   = ISolverSpartacus    !< Long-wave solver
++        ecrad_conf%do_3d_effects = .true.              !< Do we include 3D effects?
+       CASE DEFAULT
+         CALL finish(routine, 'ecrad_isolver not valid for ecRad')
+     END SELECT
+@@ -176,14 +168,13 @@ CONTAINS
+     ! Gas model and spectral bands: RRTMG or ecckd
+     SELECT CASE (ecrad_igas_model)
+       CASE(0)
+-        ecrad_conf%i_gas_model_sw = IGasModelIFSRRTMG  !< Use RRTM gas model
+-        ecrad_conf%i_gas_model_lw = IGasModelIFSRRTMG  !< Use RRTM gas model
+-        ! Although the following switches are meant for ecckd, we set them to false to prevent unexpected behavior when accessing these switches
++        ecrad_conf%i_gas_model_sw                  = IGasModelIFSRRTMG  !< Use RRTM gas model
++        ecrad_conf%i_gas_model_lw                  = IGasModelIFSRRTMG  !< Use RRTM gas model
+         ecrad_conf%do_cloud_aerosol_per_lw_g_point = .false.
+         ecrad_conf%do_cloud_aerosol_per_sw_g_point = .false.
+       CASE(1)
+-        ecrad_conf%i_gas_model_sw = IGasModelECCKD  !< Use ecckd gas model
+-        ecrad_conf%i_gas_model_lw = IGasModelECCKD  !< Use ecckd gas model
++        ecrad_conf%i_gas_model_sw                  = IGasModelECCKD     !< Use ecckd gas model
++        ecrad_conf%i_gas_model_lw                  = IGasModelECCKD     !< Use ecckd gas model
+         ecrad_conf%do_cloud_aerosol_per_lw_g_point = .true.
+         ecrad_conf%do_cloud_aerosol_per_sw_g_point = .true.
+       CASE DEFAULT
+@@ -191,7 +182,6 @@ CONTAINS
+     END SELECT
+ 
+     ! Generalized hydrometeors
+-    
+     IF ( ecrad_conf%use_general_cloud_optics ) THEN
+       ! Cont how many cloud types are.
+       ecrad_conf%n_cloud_types   = 2
+@@ -200,17 +190,16 @@ CONTAINS
+       IF ( ecrad_igraupel_scat > -1 ) ecrad_conf%n_cloud_types = ecrad_conf%n_cloud_types + 1
+ 
+       ALLOCATE (ecrad_hyd_list(ecrad_conf%n_cloud_types))
+-      ecrad_hyd_list(:) = 0
+-      cc_cloud = 0
+ 
+-      cc_cloud = cc_cloud + 1
++      ecrad_hyd_list(:)        = 0
++      cc_cloud                 = 1
+       ecrad_hyd_list(cc_cloud) = ecrad_iqc
+ 
+       SELECT CASE (ecrad_iliquid_scat)
+         CASE(0)
+           ecrad_conf%cloud_type_name(cc_cloud) = "mie_droplet"
+-        CASE DEFAULT                                                                   
+-          CALL finish(routine, 'ecrad_iliquid_scat not valid for ecRad and use_general_cloud_optics = T')  
++        CASE DEFAULT
++          CALL finish(routine, 'ecrad_iliquid_scat not valid for ecRad and use_general_cloud_optics = T')
+       END SELECT
+ 
+       cc_cloud = cc_cloud + 1
+@@ -223,8 +212,8 @@ CONTAINS
+           ecrad_conf%cloud_type_name(cc_cloud) = "fu-muskatel_ice"
+         CASE(11)
+           ecrad_conf%cloud_type_name(cc_cloud) = "baum-general-habit-mixture_ice"
+-        CASE DEFAULT                                                                   
+-          CALL finish(routine, 'ecrad_iice_scat not valid for ecRad and use_general_cloud_optics = T')  
++        CASE DEFAULT
++          CALL finish(routine, 'ecrad_iice_scat not valid for ecRad and use_general_cloud_optics = T')
+       END SELECT
+ 
+       IF (ecrad_isnow_scat > -1) THEN ! Snow is optional for radiation
+@@ -236,8 +225,8 @@ CONTAINS
+             ecrad_conf%cloud_type_name(cc_cloud) = "fu-muskatel-rough_ice"
+           CASE(10)
+             ecrad_conf%cloud_type_name(cc_cloud) = "fu-muskatel_ice"
+-          CASE DEFAULT                                                                   
+-            CALL finish(routine, 'ecrad_isnow_scat not valid for ecRad and use_general_cloud_optics = T')  
++          CASE DEFAULT
++            CALL finish(routine, 'ecrad_isnow_scat not valid for ecRad and use_general_cloud_optics = T')
+         END SELECT
+       ENDIF
+ 
+@@ -248,8 +237,8 @@ CONTAINS
+         SELECT CASE (ecrad_irain_scat)
+           CASE(0)
+             ecrad_conf%cloud_type_name(cc_cloud) = "mie_rain"
+-          CASE DEFAULT                                                                   
+-            CALL finish(routine, 'ecrad_irain_scat not valid for ecRad and use_general_cloud_optics = T')  
++          CASE DEFAULT
++            CALL finish(routine, 'ecrad_irain_scat not valid for ecRad and use_general_cloud_optics = T')
+           END SELECT
+       ENDIF
+ 
+@@ -262,12 +251,12 @@ CONTAINS
+             ecrad_conf%cloud_type_name(cc_cloud) = "fu-muskatel-rough_ice"
+           CASE(10)
+             ecrad_conf%cloud_type_name(cc_cloud) = "fu-muskatel_ice"
+-          CASE DEFAULT                                                                   
+-            CALL finish(routine, 'ecrad_igraupel_scat not valid for ecRad and use_general_cloud_optics = T')  
++          CASE DEFAULT
++            CALL finish(routine, 'ecrad_igraupel_scat not valid for ecRad and use_general_cloud_optics = T')
+         END SELECT
+       ENDIF
+       
+-    ELSE
++    ELSE ! .not.ecrad_conf%use_general_cloud_optics
+       
+       ! Liquid cloud particle scattering properties
+       SELECT CASE (ecrad_iliquid_scat)
+@@ -291,12 +280,12 @@ CONTAINS
+           CALL finish(routine, 'ecrad_iice_scat not valid for ecRad and use_general_cloud_optics = F')
+       END SELECT
+ 
+-    END IF
++    END IF ! ecrad_conf%use_general_cloud_optics
+ 
+     IF (ecrad_conf%i_gas_model_sw == IGasModelIFSRRTMG .AND. ecrad_conf%i_gas_model_lw == IGasModelIFSRRTMG) THEN
+       ecrad_conf%do_setup_ifsrrtm = .true.
+     ELSE IF (ecrad_conf%i_gas_model_sw .NE. ecrad_conf%i_gas_model_lw) THEN
+-      CALL finish(routine, "Differing gas models for LW and SW are currently unsupported. ")
++      CALL finish(routine, "Differing gas models for LW and SW are currently unsupported by ICON.")
+     ELSE
+       ecrad_conf%do_setup_ifsrrtm = .false.
+     ENDIF
+@@ -382,13 +371,13 @@ CONTAINS
+ 
+     ! Set up the near-IR, visible, and photosynthetically active radiation wavelength bounds.
+     ! Bounds for nir and vis are from mo_nwp_phy_types.
+-    CALL ecrad_conf%get_sw_weights(0.7e-6_wp, 5.0e-6_wp, &
++    CALL ecrad_conf%get_sw_weights(0.7e-6_wp, 5.0e-6_wp,       &
+       &  nweight_nir_ecrad, iband_nir_ecrad, weight_nir_ecrad, &
+       &  'near-IR radiation')
+-    CALL ecrad_conf%get_sw_weights(0.3e-6_wp, 0.7e-6_wp, &
++    CALL ecrad_conf%get_sw_weights(0.3e-6_wp, 0.7e-6_wp,       &
+       &  nweight_vis_ecrad, iband_vis_ecrad, weight_vis_ecrad, &
+       &  'visible radiation')
+-    CALL ecrad_conf%get_sw_weights(0.4e-6_wp, 0.7e-6_wp, &
++    CALL ecrad_conf%get_sw_weights(0.4e-6_wp, 0.7e-6_wp,       &
+       &  nweight_par_ecrad, iband_par_ecrad, weight_par_ecrad, &
+       &  'photosynthetically active radiation, PAR')
+ 
+@@ -418,12 +407,17 @@ CONTAINS
      !$ACC   COPYIN(ecrad_conf%i_g_from_reordered_g_lw) &
      !$ACC   COPYIN(ecrad_conf%i_emiss_from_band_lw) &
      !$ACC   COPYIN(ecrad_conf%pdf_sampler) &
@@ -3744,7 +4258,7 @@ index 262d493240..8dda39f2b9 100644
  
  #ifdef _OPENACC
      CALL ecrad_openacc_crosscheck(ecrad_conf)
-@@ -486,8 +491,7 @@ CONTAINS
+@@ -486,8 +480,7 @@ CONTAINS
          CALL finish(routine,'ecrad_conf%i_solver_sw == ISolverCloudless not ported to GPU')
      END SELECT
  
@@ -3755,45 +4269,10 @@ index 262d493240..8dda39f2b9 100644
      ENDIF
  
 diff --git a/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90 b/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90
-index f67e89d753..49ae69dfe2 100644
+index f67e89d753..63857bff03 100644
 --- a/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90
 +++ b/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90
-@@ -1,4 +1,14 @@
-+! ICON
-+!
-+! ---------------------------------------------------------------
-+! Copyright (C) 2004-2024, DWD, MPI-M, DKRZ, KIT, ETH, MeteoSwiss
-+! Contact information: icon-model.org
- !
-+! See AUTHORS.TXT for a list of authors
-+! See LICENSES/ for license information
-+! SPDX-License-Identifier: BSD-3-Clause
-+! ---------------------------------------------------------------
-+
- ! This module is the interface between ICON:nwp_radiation to the radiation scheme ecRad
- !
- ! - There are two interfaces within this module: nwp_ecrad_radiation and
-@@ -17,19 +27,6 @@
- ! - The transfer of data from ICON to ecRad and vice versa is performed within
- !   routines from mo_nwp_ecrad_utilities and mo_nwp_ecrad_prep_aerosol, independent of
- !   the choice to use a reduced radiation grid or not.
--!
--!
--!
--! ICON
--!
--! ---------------------------------------------------------------
--! Copyright (C) 2004-2024, DWD, MPI-M, DKRZ, KIT, ETH, MeteoSwiss
--! Contact information: icon-model.org
--!
--! See AUTHORS.TXT for a list of authors
--! See LICENSES/ for license information
--! SPDX-License-Identifier: BSD-3-Clause
--! ---------------------------------------------------------------
- 
- !----------------------------
- #include "omp_definitions.inc"
-@@ -115,17 +112,16 @@ CONTAINS
+@@ -115,17 +115,16 @@ CONTAINS
      TYPE(t_patch), TARGET,   INTENT(in)    :: pt_patch         !< Current domain info
      TYPE(t_external_data),   INTENT(in)    :: ext_data         !< External data container
  
@@ -3821,7 +4300,7 @@ index f67e89d753..49ae69dfe2 100644
  
      TYPE(t_nh_diag), TARGET, INTENT(in)         :: pt_diag       !< ICON diagnostic variables
      TYPE(t_nwp_phy_diag), TARGET, INTENT(inout) :: prm_diag      !< ICON physics diagnostics
-@@ -221,7 +217,7 @@ CONTAINS
+@@ -221,7 +220,7 @@ CONTAINS
      ALLOCATE( zswflx_up_clr(nproma_sub,nlevp1), zswflx_dn_clr(nproma_sub,nlevp1) )
      ALLOCATE( opt_ptrs_lw(ecrad_conf%n_bands_lw), opt_ptrs_sw(ecrad_conf%n_bands_sw) )
      !$ACC ENTER DATA CREATE(cosmu0mask, zlwflx_up, zlwflx_dn, zswflx_up, zswflx_dn, zlwflx_up_clr, zlwflx_dn_clr) &
@@ -3830,7 +4309,7 @@ index f67e89d753..49ae69dfe2 100644
  
      CALL ecrad_single_level%allocate(nproma_sub, 2, 1, .true.) !< use_sw_albedo_direct, 2 bands
      ecrad_single_level%solar_irradiance = 1._wp            !< Obtain normalized fluxes which corresponds to the
-@@ -325,7 +321,6 @@ CONTAINS
+@@ -325,7 +324,6 @@ CONTAINS
          end do
          !$ACC END PARALLEL
  
@@ -3838,7 +4317,7 @@ index f67e89d753..49ae69dfe2 100644
          !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1)
          !$ACC LOOP GANG VECTOR
          do jc = 1, nproma_sub
-@@ -340,7 +335,6 @@ CONTAINS
+@@ -340,7 +338,6 @@ CONTAINS
            ENDIF
          ENDDO
          !$ACC END PARALLEL
@@ -3846,7 +4325,7 @@ index f67e89d753..49ae69dfe2 100644
  
  ! Fill single level configuration type
          !$ACC WAIT
-@@ -409,11 +403,14 @@ CONTAINS
+@@ -409,11 +406,14 @@ CONTAINS
              &  iRadAeroART)
              DO jw = 1, ecrad_conf%n_bands_lw
                opt_ptrs_lw(jw)%ptr_od  => od_lw(jcs:jce,:,jb,jw)
@@ -3861,7 +4340,7 @@ index f67e89d753..49ae69dfe2 100644
              ENDDO
              CALL nwp_ecrad_prep_aerosol(1, nlev, i_startidx_rad, i_endidx_rad,   &
                &                         opt_ptrs_lw, opt_ptrs_sw,                &
-@@ -498,7 +495,7 @@ CONTAINS
+@@ -498,7 +498,7 @@ CONTAINS
      IF ( ecrad_conf%use_aerosols ) CALL ecrad_aerosol%deallocate()
      CALL ecrad_flux%deallocate()
      !$ACC EXIT DATA DELETE(cosmu0mask, zlwflx_up, zlwflx_dn, zswflx_up, zswflx_dn, zlwflx_up_clr, zlwflx_dn_clr) &
@@ -3870,7 +4349,7 @@ index f67e89d753..49ae69dfe2 100644
      DEALLOCATE( cosmu0mask )
      DEALLOCATE( zlwflx_up,     zlwflx_dn,     zswflx_up,    zswflx_dn     )
      DEALLOCATE( zlwflx_up_clr, zlwflx_dn_clr, zswflx_up_clr,zswflx_dn_clr )
-@@ -547,17 +544,16 @@ CONTAINS
+@@ -547,17 +547,16 @@ CONTAINS
      TYPE(t_patch), TARGET,   INTENT(in)    :: pt_par_patch     !< Parent domain info
      TYPE(t_external_data),   INTENT(in)    :: ext_data         !< External data container
  
@@ -3898,7 +4377,7 @@ index f67e89d753..49ae69dfe2 100644
  
      TYPE(t_nh_diag), TARGET, INTENT(in)    :: pt_diag       !< ICON diagnostic variables
      TYPE(t_nwp_phy_diag),    INTENT(inout) :: prm_diag      !< ICON physics diagnostics
-@@ -621,11 +617,6 @@ CONTAINS
+@@ -621,11 +620,6 @@ CONTAINS
        &  zrg_o3(:,:,:),              & !< Ozone mass mixing ratio on reduced grid
        &  zrg_tot_cld(:,:,:,:),       & !< Mass mixing ratio of water vapor, cloud water and cloud ice on reduced grid
        &  zrg_clc(:,:,:),             & !< Cloud cover on reduced grid
@@ -3910,7 +4389,7 @@ index f67e89d753..49ae69dfe2 100644
        &  zrg_trsolall(:,:,:),        & !< solar transmissivity, all sky, net down on reduced grid
        &  zrg_lwflxall(:,:,:),        & !< Terrestrial flux, all sky, net down on reduced grid
        &  zrg_lwflx_up_sfc(:,:),      & !< Longwave upward flux at surface on reduced grid
-@@ -661,14 +652,17 @@ CONTAINS
+@@ -661,14 +655,17 @@ CONTAINS
      ! Indices and pointers of extra (optional) fields that are needed by radiation
      ! and therefore have to be aggregated to the radiation grid
      INTEGER :: irg_acdnc, irg_fr_glac, irg_fr_land,  irg_qr, irg_qs, irg_qg,  &
@@ -3930,7 +4409,7 @@ index f67e89d753..49ae69dfe2 100644
  
      TYPE(t_opt_ptrs),ALLOCATABLE :: &
        &  opt_ptrs_lw(:), opt_ptrs_sw(:)    !< Contains pointers to aerosol optical properties
-@@ -758,7 +752,7 @@ CONTAINS
+@@ -758,7 +755,7 @@ CONTAINS
        !$ACC   CREATE(zrg_trsol_nir_sfc, zrg_trsol_vis_sfc, zrg_trsol_par_sfc) &
        !$ACC   CREATE(zrg_fr_nir_sfc_diff, zrg_fr_vis_sfc_diff, zrg_fr_par_sfc_diff) &
        !$ACC   CREATE(zrg_trsol_dn_sfc_diff, zrg_trsol_clr_sfc) &
@@ -3939,7 +4418,7 @@ index f67e89d753..49ae69dfe2 100644
  
      ! Set dimensions for 3D radiative flux variables
      IF (atm_phy_nwp_config(jg)%l_3d_rad_fluxes) THEN
-@@ -788,14 +782,8 @@ CONTAINS
+@@ -788,14 +785,8 @@ CONTAINS
      ALLOCATE(zrg_pres     (nproma,nlev_rg  ,nblks_par_c),   &
        &      zrg_temp     (nproma,nlev_rg  ,nblks_par_c),   &
        &      zrg_o3       (nproma,nlev_rg  ,nblks_par_c),   &
@@ -3955,7 +4434,7 @@ index f67e89d753..49ae69dfe2 100644
  
      IF (atm_phy_nwp_config(jg)%icpl_rad_reff > 0) THEN
        ALLOCATE(zrg_reff_liq (nproma,nlev_rg,nblks_par_c),   &
-@@ -830,32 +818,45 @@ CONTAINS
+@@ -830,32 +821,45 @@ CONTAINS
      irg_ssa_sw       = 0
      irg_g_sw         = 0
      irg_camsaermr(:) = 0
@@ -4019,7 +4498,7 @@ index f67e89d753..49ae69dfe2 100644
      IF (ANY( irad_aero == (/iRadAeroConstKinne,iRadAeroKinne,iRadAeroVolc,iRadAeroART,  &
        &                     iRadAeroKinneVolc,iRadAeroKinneVolcSP,iRadAeroKinneSP/) )) THEN
        ! Aerosol extra fields
-@@ -867,13 +868,13 @@ CONTAINS
+@@ -867,13 +871,13 @@ CONTAINS
          CALL input_extra_flds%assign(ssa_sw(:,:,:,jw), irg_ssa_sw(jw))
          CALL input_extra_flds%assign(g_sw(:,:,:,jw), irg_g_sw(jw))
        ENDDO
@@ -4035,7 +4514,7 @@ index f67e89d753..49ae69dfe2 100644
  
      !$ACC DATA COPYIN(input_extra_flds, input_extra_2D, input_extra_reff)
      CALL input_extra_flds%acc_attach()
-@@ -888,11 +889,11 @@ CONTAINS
+@@ -888,11 +892,11 @@ CONTAINS
      IF ( input_extra_2D%ntot > 0 )  THEN
        ALLOCATE( zrg_extra_2D(nproma,nblks_par_c,input_extra_2D%ntot) )
        !$ACC ENTER DATA CREATE(zrg_extra_2D) ASYNC(1)
@@ -4049,7 +4528,7 @@ index f67e89d753..49ae69dfe2 100644
  
  
      rl_start = 1 ! SR radiation is not set up to handle boundaries of nested domains
-@@ -936,7 +937,7 @@ CONTAINS
+@@ -936,7 +940,7 @@ CONTAINS
        CALL init(zrg_swflx_dn_clr(:,:,:), 0._wp, lacc=.TRUE., opt_acc_async=.TRUE.)
      END IF
  
@@ -4058,7 +4537,7 @@ index f67e89d753..49ae69dfe2 100644
      DO jb = i_startblk, i_endblk
        CALL get_indices_c(pt_patch, jb, i_startblk, i_endblk, &
          &                       i_startidx, i_endidx, rl_start, rl_end)
-@@ -952,28 +953,25 @@ CONTAINS
+@@ -952,28 +956,25 @@ CONTAINS
  !$OMP END PARALLEL
  
  ! Upscale ICON input fields from full grid to reduced radiation grid
@@ -4106,7 +4585,7 @@ index f67e89d753..49ae69dfe2 100644
  
  ! Set indices for reduced grid loop
      IF (jg == 1 .AND. l_limited_area) THEN
-@@ -1034,12 +1032,7 @@ CONTAINS
+@@ -1034,12 +1035,7 @@ CONTAINS
      !$ACC ENTER DATA CREATE(cosmu0mask) ASYNC(1)
      ALLOCATE(opt_ptrs_lw(ecrad_conf%n_bands_lw))
      ALLOCATE(opt_ptrs_sw(ecrad_conf%n_bands_sw))
@@ -4120,7 +4599,7 @@ index f67e89d753..49ae69dfe2 100644
  
  
  !$OMP DO PRIVATE(jb, jc, i_startidx, i_endidx,                  &
-@@ -1047,7 +1040,9 @@ CONTAINS
+@@ -1047,7 +1043,9 @@ CONTAINS
  !$OMP            i_startidx_rad,i_endidx_rad,                   &
  !$OMP            ptr_acdnc, ptr_fr_land, ptr_fr_glac,           &
  !$OMP            ptr_reff_qc, ptr_reff_qi, ptr_qr, ptr_reff_qr, &
@@ -4131,7 +4610,7 @@ index f67e89d753..49ae69dfe2 100644
  !$OMP ICON_OMP_GUIDED_SCHEDULE
      DO jb = i_startblk, i_endblk
        CALL get_indices_c(ptr_pp, jb, i_startblk, i_endblk, &
-@@ -1090,6 +1085,23 @@ CONTAINS
+@@ -1090,6 +1088,23 @@ CONTAINS
          IF ( irg_reff_qs > 0 ) ptr_reff_qs => zrg_extra_reff(jcs:jce,:,jb,irg_reff_qs)
          IF ( irg_reff_qg > 0 ) ptr_reff_qg => zrg_extra_reff(jcs:jce,:,jb,irg_reff_qg)
  
@@ -4155,7 +4634,7 @@ index f67e89d753..49ae69dfe2 100644
          IF (irad_aero == iRadAeroCAMSclim .OR. irad_aero == iRadAeroCAMStd) THEN
            IF ( ALL(irg_camsaermr(:)  > 0) ) THEN
              DO jt = 1, n_camsaermr
-@@ -1101,21 +1113,25 @@ CONTAINS
+@@ -1101,21 +1116,25 @@ CONTAINS
          IF ( ALL(irg_od_lw(:)  > 0) ) THEN
            DO jw = 1, ecrad_conf%n_bands_lw
              opt_ptrs_lw(jw)%ptr_od  => zrg_extra_flds(jcs:jce,:,jb,irg_od_lw(jw))
@@ -4181,7 +4660,7 @@ index f67e89d753..49ae69dfe2 100644
            ENDDO
          ENDIF
  
-@@ -1170,9 +1186,7 @@ CONTAINS
+@@ -1170,9 +1189,7 @@ CONTAINS
            CASE(iRadAeroTegen)
              ! Fill aerosol configuration type with Tegen aerosol
              CALL nwp_ecrad_prep_aerosol(1, nlev_rg, i_startidx_rad, i_endidx_rad,         &
@@ -4192,7 +4671,7 @@ index f67e89d753..49ae69dfe2 100644
                &                         ecrad_conf, ecrad_aerosol, lacc=.TRUE.)
            CASE(iRadAeroCAMSclim,iRadAeroCAMStd)
              ! Fill aerosol configuration type with CAMS 3D climatology/forecasted aerosols
-@@ -1238,7 +1252,6 @@ CONTAINS
+@@ -1238,7 +1255,6 @@ CONTAINS
  
  ! CLEANUP
      !$ACC WAIT
@@ -4200,7 +4679,7 @@ index f67e89d753..49ae69dfe2 100644
      CALL ecrad_single_level%deallocate()
      CALL ecrad_thermodynamics%deallocate()
      CALL ecrad_gas%deallocate()
-@@ -1253,6 +1266,7 @@ CONTAINS
+@@ -1253,6 +1269,7 @@ CONTAINS
      DO jw = 1, ecrad_conf%n_bands_sw
        CALL opt_ptrs_sw(jw)%finalize()
      ENDDO
@@ -4208,7 +4687,7 @@ index f67e89d753..49ae69dfe2 100644
      DEALLOCATE( opt_ptrs_lw, opt_ptrs_sw )
      IF (irad_aero == iRadAeroCAMSclim .OR. irad_aero == iRadAeroCAMStd) DEALLOCATE( ptr_camsaermr )
  !$OMP END PARALLEL
-@@ -1277,10 +1291,9 @@ CONTAINS
+@@ -1277,10 +1294,9 @@ CONTAINS
        &  lacc=.TRUE. )
  
      !$ACC WAIT
@@ -4220,7 +4699,7 @@ index f67e89d753..49ae69dfe2 100644
      !$ACC   DELETE(zrg_tot_cld, zrg_pres, zrg_temp, zrg_trsolall, zrg_lwflxall) &
      !$ACC   DELETE(zrg_lwflx_up_sfc, zrg_trsol_up_toa, zrg_trsol_up_sfc) &
      !$ACC   DELETE(zrg_trsol_dn_sfc_diff, zrg_trsol_clr_sfc, zrg_aclcov) &
-@@ -1291,8 +1304,8 @@ CONTAINS
+@@ -1291,8 +1307,8 @@ CONTAINS
      !$ACC   DELETE(zrg_swflx_up, zrg_swflx_dn, zrg_lwflx_up_clr, zrg_lwflx_dn_clr) &
      !$ACC   DELETE(zrg_swflx_up_clr, zrg_swflx_dn_clr)
      DEALLOCATE (zrg_cosmu0, zrg_tsfc, zrg_emis_rad, zrg_albvisdir, zrg_albnirdir, zrg_albvisdif,   &
@@ -4231,7 +4710,7 @@ index f67e89d753..49ae69dfe2 100644
        &         zrg_lwflx_up_sfc, zrg_trsol_up_toa, zrg_trsol_up_sfc, zrg_trsol_dn_sfc_diff,       &
        &         zrg_trsol_clr_sfc, zrg_aclcov, zrg_trsol_nir_sfc, zrg_trsol_vis_sfc,               &
        &         zrg_trsol_par_sfc, zrg_fr_nir_sfc_diff, zrg_fr_vis_sfc_diff,                       &
-@@ -1312,6 +1325,18 @@ CONTAINS
+@@ -1312,6 +1328,18 @@ CONTAINS
      !$ACC EXIT DATA DELETE(zrg_extra_reff) IF(input_extra_reff%ntot>0)
      IF (input_extra_reff%ntot > 0 ) DEALLOCATE(zrg_extra_reff)
  
@@ -4412,11 +4891,62 @@ index 6d4c457f20..1329557954 100644
      !$ACC   ASYNC(1) IF(PRESENT(ext_data))
  
      !$ACC UPDATE DEVICE(p_int%lsq_high, p_int%lsq_lin) &
+diff --git a/src/atm_phy_nwp/mo_nwp_gscp_interface.f90 b/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
+index 5dc76a28a5..30d7c96f71 100644
+--- a/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
++++ b/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
+@@ -319,9 +319,12 @@ CONTAINS
+           ENDIF
+ 
+         ELSE IF (atm_phy_nwp_config(jg)%icpl_aero_gscp == 3) THEN
++          !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1)
++          !$ACC LOOP GANG VECTOR
+           DO jc=i_startidx,i_endidx
+             qnc_s(jc) = prm_diag%cloud_num(jc,jb)
+           END DO
++          !$ACC END PARALLEL
+ 
+         ELSE
+ 
+diff --git a/src/atm_phy_nwp/mo_nwp_phy_init.f90 b/src/atm_phy_nwp/mo_nwp_phy_init.f90
+index 50454c61ed..c06e58cb28 100644
+--- a/src/atm_phy_nwp/mo_nwp_phy_init.f90
++++ b/src/atm_phy_nwp/mo_nwp_phy_init.f90
+@@ -955,7 +955,7 @@ SUBROUTINE init_nwp_phy ( p_patch, p_metrics,             &
+         !
+         ! Do ecrad initialization only once
+         IF (.NOT.lreset_mode .AND. jg==1) THEN
+-          CALL setup_ecrad(p_patch,ecrad_conf,ini_date)
++          CALL setup_ecrad(ecrad_conf)
+           !
+           ! Setup Tegen aerosol needs to be done only once for all domains
+           IF (irad_aero == iRadAeroTegen .OR. irad_aero == iRadAeroART) THEN
 diff --git a/src/atm_phy_nwp/mo_nwp_phy_state.f90 b/src/atm_phy_nwp/mo_nwp_phy_state.f90
-index a93b50c38d..3fc7fef192 100644
+index a93b50c38d..99b1b0028d 100644
 --- a/src/atm_phy_nwp/mo_nwp_phy_state.f90
 +++ b/src/atm_phy_nwp/mo_nwp_phy_state.f90
-@@ -2869,7 +2869,8 @@ SUBROUTINE new_nwp_phy_diag_list( k_jg, klev, klevp1, kblks,    &
+@@ -1253,18 +1253,13 @@ SUBROUTINE new_nwp_phy_diag_list( k_jg, klev, klevp1, kblks,    &
+ 
+     IF ( var_in_output%hpbl ) THEN
+ 
+-#ifdef _OPENACC
+-      CALL finish ('mo_nwp_phy_state:new_nwp_phy_diag_list', &
+-        'hpbl calculation not ported to GPU')
+-#endif
+-
+       cf_desc    = t_cf_var('hpbl', 'm', 'boundary layer height above sea level', &
+            &                datatype_flt)
+       grib2_desc = grib2_var(0, 3, 18, ibits, GRID_UNSTRUCTURED, GRID_CELL)
+       CALL add_var( diag_list, 'hpbl', diag%hpbl,                             &
+         & GRID_UNSTRUCTURED_CELL, ZA_CLOUD_TOP, cf_desc, grib2_desc,            &
+-        & ldims=shape2d, lrestart=.FALSE. )
+-
++        & ldims=shape2d, lrestart=.FALSE.,lopenacc=.TRUE.  )
++      __acc_attach(diag%hpbl)
+     ENDIF
+ 
+ 
+@@ -2869,7 +2864,8 @@ SUBROUTINE new_nwp_phy_diag_list( k_jg, klev, klevp1, kblks,    &
          grib2_desc = grib2_var(255, 255, 255, ibits, GRID_UNSTRUCTURED, GRID_CELL)
          CALL add_var( diag_list, 'aod_550nm', diag%aod_550nm,           &
            & GRID_UNSTRUCTURED_CELL, ZA_SURFACE, cf_desc, grib2_desc, ldims=shape2d, lrestart=.FALSE., &
@@ -4427,30 +4957,10 @@ index a93b50c38d..3fc7fef192 100644
      ENDIF  ! var_in_output
  
 diff --git a/src/atm_phy_nwp/mo_nwp_rad_interface.f90 b/src/atm_phy_nwp/mo_nwp_rad_interface.f90
-index 8e72687332..f57e344e06 100644
+index 8e72687332..b4a3d7f0c1 100644
 --- a/src/atm_phy_nwp/mo_nwp_rad_interface.f90
 +++ b/src/atm_phy_nwp/mo_nwp_rad_interface.f90
-@@ -1,9 +1,3 @@
--!
--! This module is the interface between nwp_nh_interface to the radiation schemes
--! (ecRad and RRTM).
--!
--!
--!
- ! ICON
- !
- ! ---------------------------------------------------------------
-@@ -15,6 +9,9 @@
- ! SPDX-License-Identifier: BSD-3-Clause
- ! ---------------------------------------------------------------
- 
-+! This module is the interface between nwp_nh_interface to the radiation schemes
-+! (ecRad and RRTM).
-+
- !----------------------------
- #include "omp_definitions.inc"
- !----------------------------
-@@ -50,11 +47,10 @@ MODULE mo_nwp_rad_interface
+@@ -50,11 +50,10 @@ MODULE mo_nwp_rad_interface
      &                                operator(+), operator(-), newTimedelta, deallocateTimedelta, &
      &                                getPTStringFromSeconds, newDatetime, deallocateDatetime
    USE mo_timer,                ONLY: timer_start, timer_stop, timers_level, timer_preradiaton
@@ -4463,7 +4973,7 @@ index 8e72687332..f57e344e06 100644
  #endif
    USE mo_bc_solar_irradiance,  ONLY: read_bc_solar_irradiance, ssi_time_interpolation
    USE mo_bcs_time_interpolation,ONLY: t_time_interpolation_weights,   &
-@@ -112,18 +108,16 @@ MODULE mo_nwp_rad_interface
+@@ -112,18 +111,16 @@ MODULE mo_nwp_rad_interface
      TYPE(datetime), POINTER :: prev_radtime
      TYPE(timedelta), POINTER :: td_dt_rad
  
@@ -4492,7 +5002,7 @@ index 8e72687332..f57e344e06 100644
  
      CHARACTER(len=max_timedelta_str_len) :: dstring
      INTEGER :: jg
-@@ -179,11 +173,12 @@ MODULE mo_nwp_rad_interface
+@@ -179,11 +176,12 @@ MODULE mo_nwp_rad_interface
          nbands_sw   = ecrad_conf%n_bands_sw ! With ecckd, this might actually be g-points if ecrad_conf%do_cloud_aerosol_per_sw_g_point
          wavenum1_sw => ecrad_conf%gas_optics_sw%spectral_def%wavenumber1_band
          wavenum2_sw => ecrad_conf%gas_optics_sw%spectral_def%wavenumber2_band
@@ -4506,7 +5016,7 @@ index 8e72687332..f57e344e06 100644
      CALL nwp_aerosol_interface(mtime_datetime, pt_patch, ext_data, pt_diag, prm_diag,     &
        &                        zf(:,:,:), zh(:,:,:), dz(:,:,:),                           &
        &                        atm_phy_nwp_config(jg)%dt_rad,                             &
-@@ -310,17 +305,18 @@ MODULE mo_nwp_rad_interface
+@@ -310,17 +308,18 @@ MODULE mo_nwp_rad_interface
  #ifdef __ECRAD
        IF (.NOT. lredgrid) THEN
          !$ACC WAIT
@@ -4527,7 +5037,7 @@ index 8e72687332..f57e344e06 100644
  #else
        CALL finish(routine,  &
          &      'atm_phy_nwp_config(jg)%inwp_radiation = 4 needs -D__ECRAD.')
-@@ -332,10 +328,7 @@ MODULE mo_nwp_rad_interface
+@@ -332,10 +331,7 @@ MODULE mo_nwp_rad_interface
        CALL finish(routine,message_text)
      END SELECT ! inwp_radiation
  
@@ -4539,6 +5049,345 @@ index 8e72687332..f57e344e06 100644
  
    END SUBROUTINE nwp_radiation
  
+diff --git a/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90 b/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90
+index ecdae30813..65506bfa11 100644
+--- a/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90
++++ b/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90
+@@ -26,7 +26,7 @@ MODULE mo_nwp_rrtm_interface
+   USE mo_atm_phy_nwp_config,   ONLY: atm_phy_nwp_config
+   USE mo_nwp_tuning_config,    ONLY: tune_dust_abs
+   USE mo_grid_config,          ONLY: l_limited_area, nexlevs_rrg_vnest
+-  USE mo_exception,            ONLY: message, message_text
++  USE mo_exception,            ONLY: finish, message, message_text
+   USE mo_ext_data_types,       ONLY: t_external_data
+   USE mo_parallel_config,      ONLY: nproma, p_test_run
+   USE mo_run_config,           ONLY: msg_level, iqv, iqc, iqi
+@@ -40,6 +40,7 @@ MODULE mo_nwp_rrtm_interface
+   USE mo_nonhydro_types,       ONLY: t_nh_diag
+   USE mo_nwp_phy_types,        ONLY: t_nwp_phy_diag
+   USE mo_radiation,            ONLY: radiation_nwp
++  USE mo_radiation_config,     ONLY: irad_aero, iRadAeroTegen, iRadAeroART
+   USE mo_aerosol_util,         ONLY: tune_dust
+   USE mo_lrtm_par,             ONLY: nbndlw
+   USE mo_sync,                 ONLY: global_max, global_min
+@@ -74,12 +75,12 @@ CONTAINS
+ 
+     LOGICAL, INTENT(IN), OPTIONAL :: lacc ! If true, use openacc
+ 
+-    REAL(wp), INTENT(in) :: &
+-      & zaeq1(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq2(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq3(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq4(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq5(nproma,pt_patch%nlev,pt_patch%nblks_c)
++    REAL(wp), ALLOCATABLE, TARGET, INTENT(inout) :: &
++      & zaeq1(:,:,:), &
++      & zaeq2(:,:,:), &
++      & zaeq3(:,:,:), &
++      & zaeq4(:,:,:), &
++      & zaeq5(:,:,:)
+ 
+     TYPE(t_nh_diag), TARGET, INTENT(in)  :: pt_diag     !<the diagnostic variables
+     TYPE(t_nwp_phy_diag),       INTENT(inout):: prm_diag
+@@ -92,6 +93,9 @@ CONTAINS
+             & ptr_reff_qc => NULL(), ptr_reff_qi => NULL()
+     REAL(wp), DIMENSION(:),    POINTER :: &
+             & ptr_fr_glac => NULL(), ptr_fr_land => NULL()
++    REAL(wp), DIMENSION(:,:), POINTER :: ptr_aeq1 => NULL(), ptr_aeq2 => NULL(), &
++      &                                  ptr_aeq3 => NULL(), ptr_aeq4 => NULL(), &
++      &                                  ptr_aeq5 => NULL()
+ 
+ #ifdef __INTEL_COMPILER
+ !DIR$ ATTRIBUTES ALIGN : 64 :: aclcov
+@@ -117,7 +121,10 @@ CONTAINS
+     nlev   = pt_patch%nlev
+     nlevp1 = pt_patch%nlevp1
+ 
+-
++    IF (irad_aero /= iRadAeroTegen .AND. irad_aero /= iRadAeroART) THEN
++      ! Work around the hard wired connection between RRTM and Tegen
++      ALLOCATE(zaeq1(nproma,nlev,1))
++    ENDIF
+ 
+     !-------------------------------------------------------------------------
+     !> Radiation
+@@ -157,8 +164,9 @@ CONTAINS
+       END IF
+     END IF
+ 
+-!$OMP PARALLEL PRIVATE(jb,i_startidx,i_endidx,dust_tunefac,                   &
+-!$OMP                  ptr_clc,ptr_acdnc,ptr_fr_land,ptr_fr_glac,ptr_reff_qc,ptr_reff_qi) 
++!$OMP PARALLEL PRIVATE(jb,i_startidx,i_endidx,dust_tunefac, &
++!$OMP                  ptr_clc,ptr_acdnc,ptr_fr_land,ptr_fr_glac,ptr_reff_qc,ptr_reff_qi, &
++!$OMP                  ptr_aeq1, ptr_aeq2, ptr_aeq3, ptr_aeq4, ptr_aeq5)
+ !$OMP DO ICON_OMP_GUIDED_SCHEDULE
+     DO jb = i_startblk, i_endblk
+ 
+@@ -193,6 +201,20 @@ CONTAINS
+         ptr_reff_qi => prm_diag%reff_qi(:,:,jb)
+       ENDIF
+ 
++      IF (irad_aero == iRadAeroTegen .OR. irad_aero == iRadAeroART) THEN
++        ptr_aeq1 => zaeq1(:,:,jb)
++        ptr_aeq2 => zaeq2(:,:,jb)
++        ptr_aeq3 => zaeq3(:,:,jb)
++        ptr_aeq4 => zaeq4(:,:,jb)
++        ptr_aeq5 => zaeq5(:,:,jb)
++      ELSE ! Work around the hard wired connection between RRTM and Tegen
++        ptr_aeq1 => zaeq1(:,:,1)
++        ptr_aeq2 => zaeq1(:,:,1)
++        ptr_aeq3 => zaeq1(:,:,1)
++        ptr_aeq4 => zaeq1(:,:,1)
++        ptr_aeq5 => zaeq1(:,:,1)
++      ENDIF
++
+       CALL radiation_nwp(               &
+                               !
+                               ! input
+@@ -235,11 +257,11 @@ CONTAINS
+         & reff_liq   =ptr_reff_qc                    ,&!< in effective radius liquid phase 
+         & reff_frz   =ptr_reff_qi                    ,&!< in effective radius frozen phase 
+         & cld_frc    =ptr_clc                        ,&!< in  cloud fraction [m2/m2]
+-        & zaeq1      = zaeq1(:,:,jb)                 ,&!< in aerosol continental
+-        & zaeq2      = zaeq2(:,:,jb)                 ,&!< in aerosol maritime
+-        & zaeq3      = zaeq3(:,:,jb)                 ,&!< in aerosol urban
+-        & zaeq4      = zaeq4(:,:,jb)                 ,&!< in aerosol volcano ashes
+-        & zaeq5      = zaeq5(:,:,jb)                 ,&!< in aerosol stratospheric background
++        & zaeq1      =ptr_aeq1                       ,&!< in aerosol continental
++        & zaeq2      =ptr_aeq2                       ,&!< in aerosol maritime
++        & zaeq3      =ptr_aeq3                       ,&!< in aerosol urban
++        & zaeq4      =ptr_aeq4                       ,&!< in aerosol volcano ashes
++        & zaeq5      =ptr_aeq5                       ,&!< in aerosol stratospheric background
+         & dust_tunefac = dust_tunefac (:,:)          ,&!< in LW tuning factor for dust aerosol
+                               ! output
+                               ! ------
+@@ -275,6 +297,13 @@ CONTAINS
+ !$OMP END DO NOWAIT
+ !$OMP END PARALLEL
+ 
++    NULLIFY(ptr_aeq1, ptr_aeq2, ptr_aeq3, ptr_aeq4, ptr_aeq5)
++
++    IF (irad_aero /= iRadAeroTegen .AND. irad_aero /= iRadAeroART) THEN
++      ! Work around the hard wired connection between RRTM and Tegen
++      IF(ALLOCATED(zaeq1)) DEALLOCATE(zaeq1)
++    ENDIF
++
+   END SUBROUTINE nwp_rrtm_radiation
+   !---------------------------------------------------------------------------------------
+ 
+@@ -292,12 +321,12 @@ CONTAINS
+     TYPE(t_patch),        TARGET,INTENT(in) :: pt_patch     !<grid/patch info.
+     TYPE(t_patch),        TARGET,INTENT(in) :: pt_par_patch !<grid/patch info (parent grid)
+     TYPE(t_external_data),INTENT(in):: ext_data
+-    REAL(wp),             INTENT(in) ::               &
+-      & zaeq1(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq2(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq3(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq4(nproma,pt_patch%nlev,pt_patch%nblks_c), &
+-      & zaeq5(nproma,pt_patch%nlev,pt_patch%nblks_c)
++    REAL(wp), ALLOCATABLE, TARGET, INTENT(inout) :: &
++      & zaeq1(:,:,:), &
++      & zaeq2(:,:,:), &
++      & zaeq3(:,:,:), &
++      & zaeq4(:,:,:), &
++      & zaeq5(:,:,:)
+ 
+     TYPE(t_nh_diag), TARGET,    INTENT(inout):: pt_diag     !<the diagnostic variables
+     TYPE(t_nwp_phy_diag),       INTENT(inout):: prm_diag
+@@ -333,11 +362,6 @@ CONTAINS
+     REAL(wp), ALLOCATABLE, TARGET:: zrg_tot_cld  (:,:,:,:)
+     REAL(wp), ALLOCATABLE, TARGET:: zlp_tot_cld  (:,:,:,:)
+     REAL(wp), ALLOCATABLE, TARGET:: zrg_clc      (:,:,:)
+-    REAL(wp), ALLOCATABLE, TARGET:: zrg_aeq1(:,:,:)
+-    REAL(wp), ALLOCATABLE, TARGET:: zrg_aeq2(:,:,:)
+-    REAL(wp), ALLOCATABLE, TARGET:: zrg_aeq3(:,:,:)
+-    REAL(wp), ALLOCATABLE, TARGET:: zrg_aeq4(:,:,:)
+-    REAL(wp), ALLOCATABLE, TARGET:: zrg_aeq5(:,:,:)
+     ! Output fields
+     REAL(wp), ALLOCATABLE, TARGET:: zrg_aclcov   (:,:)
+     REAL(wp), ALLOCATABLE, TARGET:: zrg_lwflxall (:,:,:)
+@@ -367,11 +391,14 @@ CONTAINS
+     ! Pointer to parent patch or local parent patch for reduced grid
+     TYPE(t_patch), POINTER       :: ptr_pp
+ 
+-    REAL(wp), DIMENSION(:,:), POINTER :: ptr_reff_qc => NULL(), ptr_reff_qi => NULL()
++    REAL(wp), DIMENSION(:,:), POINTER :: ptr_reff_qc => NULL(), ptr_reff_qi => NULL(), &
++      &                                  ptr_aeq1 => NULL(), ptr_aeq2 => NULL(), ptr_aeq3 => NULL(), &
++      &                                  ptr_aeq4 => NULL(), ptr_aeq5 => NULL()
+ 
+     TYPE(t_upscale_fields)   :: input_extra_flds, input_extra_2D   !< pointer array for input in upscale routine
+ 
+-    INTEGER   ::   irg_acdnc, irg_fr_land, irg_fr_glac      ! indices of extra fields
++    INTEGER   ::   irg_acdnc, irg_fr_land, irg_fr_glac, &  ! indices of extra fields
++      &            irg_zaeq1, irg_zaeq2, irg_zaeq3, irg_zaeq4, irg_zaeq5
+ 
+     ! Pointer to the acutally used variant of clc:
+     REAL(wp), DIMENSION(:,:,:), POINTER ::  ptr_clc => NULL()
+@@ -397,8 +424,8 @@ CONTAINS
+ !DIR$ ATTRIBUTES ALIGN : 64 :: zrg_ktype,zrg_pres_ifc,zlp_pres_ifc,zrg_pres
+ !DIR$ ATTRIBUTES ALIGN : 64 :: zrg_temp,zrg_o3,zrg_tot_cld
+ !DIR$ ATTRIBUTES ALIGN : 64 :: zrg_reff_liq, zrg_reff_frz, zrg_extra_flds, zrg_extra_2D
+-!DIR$ ATTRIBUTES ALIGN : 64 :: zlp_tot_cld,zrg_clc,zrg_aeq1,zrg_aeq2,zrg_aeq3
+-!DIR$ ATTRIBUTES ALIGN : 64 :: zrg_aeq4,zrg_aeq5,zrg_aclcov,zrg_lwflxall
++!DIR$ ATTRIBUTES ALIGN : 64 :: zlp_tot_cld,zrg_clc
++!DIR$ ATTRIBUTES ALIGN : 64 :: zrg_aclcov,zrg_lwflxall
+ !DIR$ ATTRIBUTES ALIGN : 64 :: zrg_trsolall,zrg_lwflx_up_sfc,zrg_trsol_up_toa
+ !DIR$ ATTRIBUTES ALIGN : 64 :: zrg_trsol_up_sfc,zrg_trsol_nir_sfc,zrg_trsol_vis_sfc,zrg_trsol_par_sfc
+ !DIR$ ATTRIBUTES ALIGN : 64 :: zrg_fr_nir_sfc_diff,zrg_fr_vis_sfc_diff,zrg_fr_par_sfc_diff
+@@ -506,11 +533,6 @@ CONTAINS
+         zrg_pres     (nproma,nlev_rg  ,nblks_par_c),   &
+         zrg_temp     (nproma,nlev_rg  ,nblks_par_c),   &
+         zrg_o3       (nproma,nlev_rg  ,nblks_par_c),   &
+-        zrg_aeq1     (nproma,nlev_rg  ,nblks_par_c),   &
+-        zrg_aeq2     (nproma,nlev_rg  ,nblks_par_c),   &
+-        zrg_aeq3     (nproma,nlev_rg  ,nblks_par_c),   &
+-        zrg_aeq4     (nproma,nlev_rg  ,nblks_par_c),   &
+-        zrg_aeq5     (nproma,nlev_rg  ,nblks_par_c),   &
+         zrg_tot_cld  (nproma,nlev_rg  ,nblks_par_c,3), &
+         zlp_tot_cld  (nproma,nlev_rg  ,nblks_lp_c,3),  &
+         zrg_clc      (nproma,nlev_rg  ,nblks_par_c),   &
+@@ -538,15 +560,32 @@ CONTAINS
+         zrg_swflx_up_clr(np, nl, nblks_par_c),         &
+         zrg_swflx_dn_clr(np, nl, nblks_par_c) )
+ 
++      IF (irad_aero /= iRadAeroTegen .AND. irad_aero /= iRadAeroART) THEN
++        ! Work around the hard wired connection between RRTM and Tegen
++        ALLOCATE(zaeq1(nproma,nlev_rg,1))
++      ENDIF
+ 
+     ! Set indices for extra fields in the upscaling routine
+       irg_acdnc   = 0
+       irg_fr_land = 0
+       irg_fr_glac = 0
++      irg_zaeq1   = 0
++      irg_zaeq2   = 0
++      irg_zaeq3   = 0
++      irg_zaeq4   = 0
++      irg_zaeq5   = 0
+     
+       CALL input_extra_flds%construct(nlev_rg)  ! Extra fields in upscaling routine. 3D fields with nlev_rg
+       CALL input_extra_2D%construct(1)          ! Extra fields in upscaling routine: 2D fields
+-    
++
++      IF (irad_aero == iRadAeroTegen .OR. irad_aero == iRadAeroART) THEN
++        CALL input_extra_flds%assign(zaeq1(:,:,:), irg_zaeq1)
++        CALL input_extra_flds%assign(zaeq2(:,:,:), irg_zaeq2)
++        CALL input_extra_flds%assign(zaeq3(:,:,:), irg_zaeq3)
++        CALL input_extra_flds%assign(zaeq4(:,:,:), irg_zaeq4)
++        CALL input_extra_flds%assign(zaeq5(:,:,:), irg_zaeq5)
++      ENDIF
++
+       IF (l_coupled_reff) THEN
+         ALLOCATE(zrg_reff_liq (nproma,nlev_rg,nblks_par_c),   &
+              zrg_reff_frz (nproma,nlev_rg,nblks_par_c))
+@@ -617,13 +656,12 @@ CONTAINS
+         & prm_diag%ktype, pt_diag%pres_ifc, pt_diag%pres,               &
+         & pt_diag%temp,                                                 &
+         & prm_diag%tot_cld, ptr_clc,                                    &
+-        & ext_data%atm%o3, zaeq1, zaeq2, zaeq3, zaeq4, zaeq5,           &
++        & ext_data%atm%o3,                                              &
+         & zrg_emis_rad,                                                 &
+         & zrg_cosmu0, zrg_albvisdir, zrg_albnirdir, zrg_albvisdif,      &
+         & zrg_albnirdif, zrg_albdif, zrg_tsfc, zrg_rtype, zrg_pres_ifc, &
+         & zrg_pres, zrg_temp,                                           &
+         & zrg_tot_cld, zrg_clc, zrg_o3,                                 &
+-        & zrg_aeq1, zrg_aeq2, zrg_aeq3, zrg_aeq4, zrg_aeq5,             &
+         & zlp_pres_ifc, zlp_tot_cld, prm_diag%buffer_rrg,               &
+         & atm_phy_nwp_config(jg)%icpl_rad_reff,                         &
+         & prm_diag%reff_qc, prm_diag%reff_qi,                           &
+@@ -840,11 +878,6 @@ CONTAINS
+             zrg_pres     (1:i_startidx-1,jk,jb) = zrg_pres     (i_startidx,jk,jb)
+             zrg_temp     (1:i_startidx-1,jk,jb) = zrg_temp     (i_startidx,jk,jb)
+             zrg_o3       (1:i_startidx-1,jk,jb) = zrg_o3       (i_startidx,jk,jb)
+-            zrg_aeq1     (1:i_startidx-1,jk,jb) = zrg_aeq1     (i_startidx,jk,jb)
+-            zrg_aeq2     (1:i_startidx-1,jk,jb) = zrg_aeq2     (i_startidx,jk,jb)
+-            zrg_aeq3     (1:i_startidx-1,jk,jb) = zrg_aeq3     (i_startidx,jk,jb)
+-            zrg_aeq4     (1:i_startidx-1,jk,jb) = zrg_aeq4     (i_startidx,jk,jb)
+-            zrg_aeq5     (1:i_startidx-1,jk,jb) = zrg_aeq5     (i_startidx,jk,jb)
+             zrg_tot_cld  (1:i_startidx-1,jk,jb,iqv) = zrg_tot_cld(i_startidx,jk,jb,iqv)
+             zrg_tot_cld  (1:i_startidx-1,jk,jb,iqc) = zrg_tot_cld(i_startidx,jk,jb,iqc)
+             zrg_tot_cld  (1:i_startidx-1,jk,jb,iqi) = zrg_tot_cld(i_startidx,jk,jb,iqi)
+@@ -870,7 +903,8 @@ CONTAINS
+ #if !defined(__PGI)
+ !FIXME: PGI + OpenMP produce deadlock in this loop. Compiler bug suspected
+ !ICON_OMP PARALLEL DO PRIVATE(jb,jk,i_startidx,i_endidx,dust_tunefac,              &    
+-!ICON_OMP              ptr_acdnc, ptr_fr_land,ptr_fr_glac,ptr_reff_qc,ptr_reff_qi) &
++!ICON_OMP              ptr_acdnc, ptr_fr_land,ptr_fr_glac,ptr_reff_qc,ptr_reff_qi, &
++!ICON_OMP              ptr_aeq1, ptr_aeq2, ptr_aeq3, ptr_aeq4, ptr_aeq5) &
+ !ICON_OMP ICON_OMP_GUIDED_SCHEDULE
+ #endif
+       DO jb = i_startblk, i_endblk
+@@ -889,6 +923,7 @@ CONTAINS
+         zrg_ktype(1:i_endidx,jb) = NINT(zrg_rtype(1:i_endidx,jb))
+ 
+       NULLIFY(ptr_acdnc,ptr_fr_land,ptr_fr_glac,ptr_reff_qc,ptr_reff_qi)
++      NULLIFY(ptr_aeq1, ptr_aeq2, ptr_aeq3, ptr_aeq4, ptr_aeq5)
+ 
+       IF (l_coupled_reff) THEN
+         ptr_reff_qc => zrg_reff_liq(:,:,jb)
+@@ -899,6 +934,24 @@ CONTAINS
+       IF ( irg_fr_land > 0 ) ptr_fr_land => zrg_extra_2D(:,jb,irg_fr_land)
+       IF ( irg_fr_glac > 0 ) ptr_fr_glac => zrg_extra_2D(:,jb,irg_fr_glac)
+ 
++      IF (irad_aero == iRadAeroTegen .OR. irad_aero == iRadAeroART) THEN
++        IF ( ALL((/irg_zaeq1, irg_zaeq2, irg_zaeq3, irg_zaeq4, irg_zaeq5/) > 0) ) THEN
++          ptr_aeq1 => zrg_extra_flds(:,:,jb,irg_zaeq1)
++          ptr_aeq2 => zrg_extra_flds(:,:,jb,irg_zaeq2)
++          ptr_aeq3 => zrg_extra_flds(:,:,jb,irg_zaeq3)
++          ptr_aeq4 => zrg_extra_flds(:,:,jb,irg_zaeq4)
++          ptr_aeq5 => zrg_extra_flds(:,:,jb,irg_zaeq5)
++        ELSE
++          CALL finish(routine, 'Upscaling of Tegen fields not successful')
++        ENDIF
++      ELSE ! Work around the hard wired connection between RRTM and Tegen
++        ptr_aeq1 => zaeq1(:,:,1)
++        ptr_aeq2 => zaeq1(:,:,1)
++        ptr_aeq3 => zaeq1(:,:,1)
++        ptr_aeq4 => zaeq1(:,:,1)
++        ptr_aeq5 => zaeq1(:,:,1)
++      ENDIF
++
+         CALL radiation_nwp(               &
+                                 !
+                                 ! input
+@@ -940,11 +993,11 @@ CONTAINS
+           & reff_liq   =ptr_reff_qc             ,&!< in    effective radius liquid phase. [m]
+           & reff_frz   =ptr_reff_qi             ,&!< in    effective radius frozen phase. [m]
+           & cld_frc    =zrg_clc    (:,:,jb)     ,&!< in    cld_frac = cloud fraction [m2/m2]
+-          & zaeq1      = zrg_aeq1(:,:,jb)       ,&!< in aerosol continental
+-          & zaeq2      = zrg_aeq2(:,:,jb)       ,&!< in aerosol maritime
+-          & zaeq3      = zrg_aeq3(:,:,jb)       ,&!< in aerosol urban
+-          & zaeq4      = zrg_aeq4(:,:,jb)       ,&!< in aerosol volcano ashes
+-          & zaeq5      = zrg_aeq5(:,:,jb)       ,&!< in aerosol stratospheric background
++          & zaeq1      = ptr_aeq1               ,&!< in aerosol continental
++          & zaeq2      = ptr_aeq2               ,&!< in aerosol maritime
++          & zaeq3      = ptr_aeq3               ,&!< in aerosol urban
++          & zaeq4      = ptr_aeq4               ,&!< in aerosol volcano ashes
++          & zaeq5      = ptr_aeq5               ,&!< in aerosol stratospheric background
+           & dust_tunefac = dust_tunefac (:,:)   ,&!< in LW tuning factor for dust aerosol
+                                 !
+                                 ! output
+@@ -1036,7 +1089,7 @@ CONTAINS
+ 
+       DEALLOCATE (zrg_cosmu0, zrg_albvisdir, zrg_albnirdir, zrg_albvisdif, zrg_albnirdif, &
+         zrg_albdif, zrg_tsfc, zrg_pres_ifc, zrg_pres, zrg_temp, zrg_o3, zrg_ktype,        &
+-        zrg_aeq1,zrg_aeq2,zrg_aeq3,zrg_aeq4,zrg_aeq5, zrg_tot_cld, zrg_clc,               &
++        zrg_tot_cld, zrg_clc,                                                             &
+         zrg_aclcov, zrg_lwflxall, zrg_trsolall, zrg_lwflx_up_sfc, zrg_trsol_up_toa,       &
+         zrg_trsol_up_sfc, zrg_trsol_nir_sfc, zrg_trsol_vis_sfc, zrg_trsol_par_sfc,        &
+         zrg_fr_nir_sfc_diff, zrg_fr_vis_sfc_diff, zrg_fr_par_sfc_diff,                    &
+@@ -1047,6 +1100,11 @@ CONTAINS
+       IF (l_coupled_reff) DEALLOCATE(zrg_reff_liq,zrg_reff_frz)     
+       IF (input_extra_flds%ntot > 0 ) DEALLOCATE(zrg_extra_flds)
+       IF (input_extra_2D%ntot > 0   ) DEALLOCATE(zrg_extra_2D  )
++      NULLIFY(ptr_aeq1, ptr_aeq2, ptr_aeq3, ptr_aeq4, ptr_aeq5)
++      IF (irad_aero /= iRadAeroTegen .AND. irad_aero /= iRadAeroART) THEN
++        ! Work around the hard wired connection between RRTM and Tegen
++        IF(ALLOCATED(zaeq1)) DEALLOCATE(zaeq1)
++      ENDIF
+     
+       CALL input_extra_flds%destruct()
+       CALL input_extra_2D%destruct()
 diff --git a/src/atm_phy_nwp/mo_nwp_vdiff_sea.f90 b/src/atm_phy_nwp/mo_nwp_vdiff_sea.f90
 index 7e317b6421..47007452fb 100644
 --- a/src/atm_phy_nwp/mo_nwp_vdiff_sea.f90
@@ -4552,6 +5401,218 @@ index 7e317b6421..47007452fb 100644
    END SUBROUTINE nwp_vdiff_update_seaice
  
    !>
+diff --git a/src/atm_phy_nwp/mo_phys_nest_utilities.f90 b/src/atm_phy_nwp/mo_phys_nest_utilities.f90
+index ee40a1f4f0..4d97867867 100644
+--- a/src/atm_phy_nwp/mo_phys_nest_utilities.f90
++++ b/src/atm_phy_nwp/mo_phys_nest_utilities.f90
+@@ -199,11 +199,10 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+   cosmu0, albvisdir, albnirdir, albvisdif, albnirdif, albdif,              &
+   tsfc, ktype, pres_ifc, pres, temp,                                       &
+   tot_cld, clc, q_o3,                                                      &
+-  aeq1, aeq2, aeq3, aeq4, aeq5,                                            &
+   rg_emis_rad,                                                             &
+   rg_cosmu0, rg_albvisdir, rg_albnirdir, rg_albvisdif, rg_albnirdif,       &
+   rg_albdif, rg_tsfc, rg_rtype, rg_pres_ifc, rg_pres, rg_temp,             &
+-  rg_tot_cld, rg_clc, rg_q_o3, rg_aeq1, rg_aeq2, rg_aeq3, rg_aeq4, rg_aeq5,&
++  rg_tot_cld, rg_clc, rg_q_o3,                                             &
+   z_pres_ifc, z_tot_cld, buffer_rrg,                                       &
+   icpl_rad_reff, reff_liq, reff_frz, rg_reff_liq, rg_reff_frz,             &
+   input_extra_flds, rg_extra_flds, input_extra_2D, rg_extra_2D,            &     
+@@ -221,8 +220,7 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     emis_rad(:,:),                                                                        &
+     cosmu0(:,:), albvisdir(:,:), albnirdir(:,:), albvisdif(:,:), albnirdif(:,:),          &
+     albdif(:,:), tsfc(:,:), pres_ifc(:,:,:), pres(:,:,:), temp(:,:,:),                    &
+-    tot_cld(:,:,:,:), clc(:,:,:), q_o3(:,:,:), aeq1(:,:,:), aeq2(:,:,:), aeq3(:,:,:),     &
+-    aeq4(:,:,:), aeq5(:,:,:)
++    tot_cld(:,:,:,:), clc(:,:,:), q_o3(:,:,:)
+ 
+   REAL(wp), INTENT(IN), OPTIONAL ::  reff_liq(:,:,:), reff_frz(:,:,:)
+   
+@@ -239,8 +237,7 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     rg_cosmu0(:,:), rg_albvisdir(:,:), rg_albnirdir(:,:), rg_albvisdif(:,:), &
+     rg_albnirdif(:,:), rg_albdif(:,:), rg_tsfc(:,:), rg_rtype(:,:),          &
+     rg_pres_ifc(:,:,:), rg_pres(:,:,:), rg_temp(:,:,:),                      &
+-    rg_tot_cld(:,:,:,:), rg_clc(:,:,:), rg_q_o3(:,:,:), rg_aeq1(:,:,:),      &
+-    rg_aeq2(:,:,:), rg_aeq3(:,:,:), rg_aeq4(:,:,:),rg_aeq5(:,:,:),           &
++    rg_tot_cld(:,:,:,:), rg_clc(:,:,:), rg_q_o3(:,:,:),                      &
+     ! these have the same function as the intermediate storage fields below but are passed to the calling routine
+     z_pres_ifc(:,:,:), z_tot_cld(:,:,:,:)
+ 
+@@ -254,8 +251,7 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     z_emis_rad(:,:),                                                           &
+     z_cosmu0(:,:), z_albvisdir(:,:), z_albnirdir(:,:), z_albvisdif(:,:),       &
+     z_albnirdif(:,:), z_albdif(:,:), z_tsfc(:,:), z_rtype(:,:),                &
+-    z_pres(:,:,:), z_temp(:,:,:), z_clc(:,:,:), z_q_o3(:,:,:),                 & 
+-    z_aeq1(:,:,:), z_aeq2(:,:,:), z_aeq3(:,:,:), z_aeq4(:,:,:), z_aeq5(:,:,:), &
++    z_pres(:,:,:), z_temp(:,:,:), z_clc(:,:,:), z_q_o3(:,:,:),                 &
+     z_aux3d(:,:,:), zrg_aux3d(:,:,:), z_reff_liq(:,:,:), z_reff_frz(:,:,:),    &
+     z_extra_flds(:,:,:,:), z_extra_2D(:,:,:), z_extra_reff(:,:,:,:)
+ 
+@@ -268,8 +264,7 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     p_pres_ifc(:,:,:), p_pres(:,:,:), p_temp(:,:,:),                     &
+     p_reff_liq(:,:,:), p_reff_frz(:,:,:),                                &
+     p_extra_flds(:,:,:,:), p_extra_2D(:,:,:), p_extra_reff(:,:,:,:),     &
+-    p_tot_cld(:,:,:,:), p_clc(:,:,:), p_q_o3(:,:,:), p_aeq1(:,:,:),      &
+-    p_aeq2(:,:,:), p_aeq3(:,:,:), p_aeq4(:,:,:),p_aeq5(:,:,:)
++    p_tot_cld(:,:,:,:), p_clc(:,:,:), p_q_o3(:,:,:)
+ 
+   ! Buffer for auxiliary temperature and pressure levels above the vertical nest interface
+   REAL(wp), INTENT(IN) :: buffer_rrg(:,:,:)
+@@ -306,11 +301,11 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+   ! arguments intent(in/out)
+   !$ACC DATA PRESENT(emis_rad, cosmu0, albvisdir, albnirdir, albvisdif, albnirdif) &
+   !$ACC   PRESENT(albdif, tsfc, pres_ifc, pres, temp) &
+-  !$ACC   PRESENT(tot_cld, clc, q_o3, aeq1, aeq2, aeq3, aeq4, aeq5) &
++  !$ACC   PRESENT(tot_cld, clc, q_o3) &
+   !$ACC   PRESENT(ktype, buffer_rrg) &
+   !$ACC   PRESENT(rg_emis_rad, rg_cosmu0, rg_albvisdir, rg_albnirdir, rg_albvisdif, rg_albnirdif) &
+   !$ACC   PRESENT(rg_albdif, rg_tsfc, rg_pres_ifc, rg_pres, rg_temp) &
+-  !$ACC   PRESENT(rg_tot_cld, rg_clc, rg_q_o3, rg_aeq1, rg_aeq2, rg_aeq3, rg_aeq4, rg_aeq5, z_pres_ifc, z_tot_cld) &
++  !$ACC   PRESENT(rg_tot_cld, rg_clc, rg_q_o3, z_pres_ifc, z_tot_cld) &
+   !$ACC   PRESENT(input_extra_flds, input_extra_2D, input_extra_reff) &
+   !$ACC   PRESENT(rg_extra_flds, rg_extra_2D, rg_extra_reff) IF(lzacc)
+ 
+@@ -383,16 +378,13 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+              z_albnirdif(nproma,nblks_c_lp), z_albdif(nproma,nblks_c_lp),               &
+              z_tsfc(nproma,nblks_c_lp), z_rtype(nproma,nblks_c_lp),                     &
+              z_pres(nproma,nlev_rg,nblks_c_lp), z_temp(nproma,nlev_rg,nblks_c_lp),      &
+-             z_clc(nproma,nlev_rg,nblks_c_lp),                                          &
+-             z_q_o3(nproma,nlev_rg,nblks_c_lp), z_aeq1(nproma,nlev_rg,nblks_c_lp),      &
+-             z_aeq2(nproma,nlev_rg,nblks_c_lp), z_aeq3(nproma,nlev_rg,nblks_c_lp),      &
+-             z_aeq4(nproma,nlev_rg,nblks_c_lp), z_aeq5(nproma,nlev_rg,nblks_c_lp),      &
++             z_clc(nproma,nlev_rg,nblks_c_lp), z_q_o3(nproma,nlev_rg,nblks_c_lp),       &
+              z_aux3d(nproma,n2d_upsc,nblks_c_lp), zrg_aux3d(nproma,n2d_upsc,p_patch(jgp)%nblks_c) )
+ 
+     ! enter data for local arrays
+     !$ACC ENTER DATA CREATE(z_emis_rad, z_cosmu0, z_albvisdir, z_albnirdir, z_albvisdif) &
+     !$ACC   CREATE(z_albnirdif, z_albdif, z_tsfc, z_rtype, z_pres, z_temp, z_clc) &
+-    !$ACC   CREATE(z_q_o3, z_aeq1, z_aeq2, z_aeq3, z_aeq4, z_aeq5, z_aux3d, zrg_aux3d) IF(lzacc)
++    !$ACC   CREATE(z_q_o3, z_aux3d, zrg_aux3d) IF(lzacc)
+ 
+     IF ( l_upsc_reff ) THEN
+       ALLOCATE ( z_reff_liq(nproma,nlev_rg,nblks_c_lp), z_reff_frz(nproma,nlev_rg,nblks_c_lp) )
+@@ -438,11 +430,6 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     p_tot_cld    => z_tot_cld
+     p_clc        => z_clc
+     p_q_o3       => z_q_o3
+-    p_aeq1       => z_aeq1
+-    p_aeq2       => z_aeq2
+-    p_aeq3       => z_aeq3
+-    p_aeq4       => z_aeq4
+-    p_aeq5       => z_aeq5
+   ELSE
+     p_emis_rad   => rg_emis_rad
+     p_cosmu0     => rg_cosmu0
+@@ -466,17 +453,12 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     p_tot_cld    => rg_tot_cld
+     p_clc        => rg_clc
+     p_q_o3       => rg_q_o3
+-    p_aeq1       => rg_aeq1
+-    p_aeq2       => rg_aeq2
+-    p_aeq3       => rg_aeq3
+-    p_aeq4       => rg_aeq4
+-    p_aeq5       => rg_aeq5
+   ENDIF
+ 
+   ! data present for pointers
+   !$ACC DATA PRESENT(p_patch, p_emis_rad, p_cosmu0, p_albvisdir, p_albnirdir, p_albvisdif, p_albnirdif) &
+   !$ACC   PRESENT(p_albdif, p_tsfc, p_rtype, p_pres_ifc, p_pres, p_temp) &
+-  !$ACC   PRESENT(p_tot_cld, p_clc, p_q_o3, p_aeq1, p_aeq2, p_aeq3, p_aeq4, p_aeq5) IF(lzacc)
++  !$ACC   PRESENT(p_tot_cld, p_clc, p_q_o3) IF(lzacc)
+ 
+   ! data present for optional pointers
+   !$ACC DATA PRESENT(p_extra_flds) IF(l_upsc_extra_flds .AND. lzacc)
+@@ -508,11 +490,6 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     p_tot_cld    = 0._wp
+     p_clc        = 0._wp
+     p_q_o3       = 0._wp
+-    p_aeq1       = 0._wp
+-    p_aeq2       = 0._wp
+-    p_aeq3       = 0._wp
+-    p_aeq4       = 0._wp
+-    p_aeq5       = 0._wp
+     !$ACC END KERNELS
+   ENDIF
+ 
+@@ -695,36 +672,6 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+           q_o3(iidx(jc,jb,3),jk,iblk(jc,jb,3))*p_fbkwgt(jc,jb,3) + &
+           q_o3(iidx(jc,jb,4),jk,iblk(jc,jb,4))*p_fbkwgt(jc,jb,4)
+ 
+-        p_aeq1(jc,jk1,jb) =                                        &
+-          aeq1(iidx(jc,jb,1),jk,iblk(jc,jb,1))*p_fbkwgt(jc,jb,1) + &
+-          aeq1(iidx(jc,jb,2),jk,iblk(jc,jb,2))*p_fbkwgt(jc,jb,2) + &
+-          aeq1(iidx(jc,jb,3),jk,iblk(jc,jb,3))*p_fbkwgt(jc,jb,3) + &
+-          aeq1(iidx(jc,jb,4),jk,iblk(jc,jb,4))*p_fbkwgt(jc,jb,4)
+-
+-        p_aeq2(jc,jk1,jb) =                                        &
+-          aeq2(iidx(jc,jb,1),jk,iblk(jc,jb,1))*p_fbkwgt(jc,jb,1) + &
+-          aeq2(iidx(jc,jb,2),jk,iblk(jc,jb,2))*p_fbkwgt(jc,jb,2) + &
+-          aeq2(iidx(jc,jb,3),jk,iblk(jc,jb,3))*p_fbkwgt(jc,jb,3) + &
+-          aeq2(iidx(jc,jb,4),jk,iblk(jc,jb,4))*p_fbkwgt(jc,jb,4)
+-
+-        p_aeq3(jc,jk1,jb) =                                        &
+-          aeq3(iidx(jc,jb,1),jk,iblk(jc,jb,1))*p_fbkwgt(jc,jb,1) + &
+-          aeq3(iidx(jc,jb,2),jk,iblk(jc,jb,2))*p_fbkwgt(jc,jb,2) + &
+-          aeq3(iidx(jc,jb,3),jk,iblk(jc,jb,3))*p_fbkwgt(jc,jb,3) + &
+-          aeq3(iidx(jc,jb,4),jk,iblk(jc,jb,4))*p_fbkwgt(jc,jb,4)
+-
+-        p_aeq4(jc,jk1,jb) =                                        &
+-          aeq4(iidx(jc,jb,1),jk,iblk(jc,jb,1))*p_fbkwgt(jc,jb,1) + &
+-          aeq4(iidx(jc,jb,2),jk,iblk(jc,jb,2))*p_fbkwgt(jc,jb,2) + &
+-          aeq4(iidx(jc,jb,3),jk,iblk(jc,jb,3))*p_fbkwgt(jc,jb,3) + &
+-          aeq4(iidx(jc,jb,4),jk,iblk(jc,jb,4))*p_fbkwgt(jc,jb,4)
+-
+-        p_aeq5(jc,jk1,jb) =                                        &
+-          aeq5(iidx(jc,jb,1),jk,iblk(jc,jb,1))*p_fbkwgt(jc,jb,1) + &
+-          aeq5(iidx(jc,jb,2),jk,iblk(jc,jb,2))*p_fbkwgt(jc,jb,2) + &
+-          aeq5(iidx(jc,jb,3),jk,iblk(jc,jb,3))*p_fbkwgt(jc,jb,3) + &
+-          aeq5(iidx(jc,jb,4),jk,iblk(jc,jb,4))*p_fbkwgt(jc,jb,4)
+-
+ #ifndef _OPENACC
+       ENDDO
+     ENDDO
+@@ -952,11 +899,6 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+       DO jk = 1, nshift
+ !$NEC ivdep
+         DO jc = i_startidx, i_endidx
+-          p_aeq1(jc,jk,jb) = p_aeq1(jc,jk1,jb)
+-          p_aeq2(jc,jk,jb) = p_aeq2(jc,jk1,jb)
+-          p_aeq3(jc,jk,jb) = p_aeq3(jc,jk1,jb)
+-          p_aeq4(jc,jk,jb) = p_aeq4(jc,jk1,jb)
+-          p_aeq5(jc,jk,jb) = p_aeq5(jc,jk1,jb)
+           p_tot_cld(jc,jk,jb,1:3) = p_tot_cld(jc,jk1,jb,1:3)
+           p_clc (jc,jk,jb) = p_clc(jc,jk1,jb)
+           p_q_o3(jc,jk,jb) = p_q_o3(jc,jk1,jb)
+@@ -1050,13 +992,8 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+ 
+     CALL exchange_data_mult(p_pat=p_pp%comm_pat_loc_to_glb_c_fbk,         &
+                             lacc=lzacc,                                   &
+-                            nfields=9, ndim2tot=9*nlev_rg,                &
+-                            RECV1=rg_aeq1,     SEND1=z_aeq1,              &
+-                            RECV2=rg_aeq2,     SEND2=z_aeq2,              &
+-                            RECV3=rg_aeq3,     SEND3=z_aeq3,              &
+-                            RECV4=rg_aeq4,     SEND4=z_aeq4,              &
+-                            RECV5=rg_aeq5,     SEND5=z_aeq5,              &
+-                            RECV6=rg_clc,      SEND6=z_clc,               &
++                            nfields=4, ndim2tot=4*nlev_rg,                &
++                            RECV1=rg_clc,      SEND1=z_clc,               &
+                             RECV4D=rg_tot_cld, SEND4D=z_tot_cld           )
+ 
+ ! Maximum number of SEND/RECIV is 7. Put this into first call when acdnc is not used
+@@ -1147,11 +1084,11 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
+     ! exit data for local arrays
+     !$ACC EXIT DATA DELETE(z_emis_rad, z_cosmu0, z_albvisdir, z_albnirdir, z_albvisdif) &
+     !$ACC   DELETE(z_albnirdif, z_albdif, z_tsfc, z_rtype, z_pres, z_temp, z_clc) &
+-    !$ACC   DELETE(z_q_o3, z_aeq1, z_aeq2, z_aeq3, z_aeq4, z_aeq5, z_aux3d, zrg_aux3d) IF(lzacc)
++    !$ACC   DELETE(z_q_o3, z_aux3d, zrg_aux3d) IF(lzacc)
+ 
+     DEALLOCATE(z_emis_rad, z_cosmu0, z_albvisdir, z_albnirdir,                       &
+       & z_albvisdif, z_albnirdif, z_albdif, z_tsfc, z_rtype, z_pres, z_temp,         &
+-      & z_clc, z_q_o3, z_aeq1, z_aeq2, z_aeq3, z_aeq4, z_aeq5, z_aux3d, zrg_aux3d)
++      & z_clc, z_q_o3, z_aux3d, zrg_aux3d)
+ 
+     IF ( l_upsc_reff ) THEN
+       !$ACC EXIT DATA DELETE(z_reff_liq, z_reff_frz) IF(lzacc)
 diff --git a/src/atm_phy_rte_rrtmgp/mo_rte_rrtmgp_interface.f90 b/src/atm_phy_rte_rrtmgp/mo_rte_rrtmgp_interface.f90
 index 66e940c6a2..3742012c70 100644
 --- a/src/atm_phy_rte_rrtmgp/mo_rte_rrtmgp_interface.f90
@@ -4702,6 +5763,69 @@ index 66e940c6a2..3742012c70 100644
      !$ACC DATA CREATE(source_lw, atmos_lw)
  
      !$ACC DATA CREATE(source_lw%lay_source, source_lw%lev_source_inc) &
+diff --git a/src/atm_phy_schemes/mo_o3_util.f90 b/src/atm_phy_schemes/mo_o3_util.f90
+index 95b519d97d..42abd3ac54 100644
+--- a/src/atm_phy_schemes/mo_o3_util.f90
++++ b/src/atm_phy_schemes/mo_o3_util.f90
+@@ -191,28 +191,32 @@ CONTAINS
+ 
+         ALLOCATE(zo3_timint(nproma,ext_ozone(jg)%nplev_o3), STAT=istat)
+           IF(istat /= SUCCESS) CALL finish(routine, 'Allocation of zo3_timint failed')
++        !$ACC ENTER DATA CREATE(zo3_timint)
+ !$OMP PARALLEL
+ !$OMP DO PRIVATE(jb,i_startidx,i_endidx) ICON_OMP_DEFAULT_SCHEDULE
+         DO jb = i_startblk,i_endblk
+           CALL get_indices_c(pt_patch,jb,i_startblk,i_endblk,i_startidx,i_endidx,rl_start,rl_end)
+-          CALL o3_timeint(jcs = 1, jce = i_endidx, kbdim = nproma,       &
+-               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         &
+-               &          ext_o3       = ext_ozone(jg)%o3_plev(:,:,jb,:),&
+-               &          current_date = mtime_datetime,                 &
+-               &          o3_time_int  = zo3_timint                      ) ! OUT
++          CALL o3_timeint(jcs = 1, jce = i_endidx, kbdim = nproma,       & ! IN
++               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         & ! IN
++               &          ext_o3       = ext_ozone(jg)%o3_plev(:,:,jb,:),& ! IN
++               &          current_date = mtime_datetime,                 & ! IN
++               &          o3_time_int  = zo3_timint,                     & ! OUT
++               &          opt_use_acc  = .TRUE.                          )
+           CALL o3_pl2ml  (jcs = 1, jce = i_endidx, kbdim = nproma,       &
+-               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         &
+-               &          klev         = pt_patch%nlev,                  &
+-               &          pfoz         = ext_ozone(jg)%plev_full_o3,     &
+-               &          phoz         = ext_ozone(jg)%plev_half_o3,     &
+-               &          ppf          = pt_diag%pres(:,:,jb),           &
+-               &          pph          = pt_diag%pres_ifc(:,:,jb),       &
++               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         & ! IN
++               &          klev         = pt_patch%nlev,                  & ! IN
++               &          pfoz         = ext_ozone(jg)%plev_full_o3,     & ! IN
++               &          phoz         = ext_ozone(jg)%plev_half_o3,     & ! IN
++               &          ppf          = pt_diag%pres(:,:,jb),           & ! IN
++               &          pph          = pt_diag%pres_ifc(:,:,jb),       & ! IN
+                &          o3_time_int  = zo3_timint,                     & ! IN
+-               &          o3_clim      = o3(:,:,jb)                      ) ! OUT ozone mass mixing ratio [kg/kg]
++               &          o3_clim      = o3(:,:,jb),                     & ! OUT ozone mass mixing ratio [kg/kg]
++               &          opt_use_acc  = .TRUE.                          )
+         ENDDO !jb
+ !$OMP END DO NOWAIT
+ !$OMP END PARALLEL
+ 
++      !$ACC EXIT DATA DELETE(zo3_timint)
+       DEALLOCATE(zo3_timint, STAT=istat)
+         IF(istat /= SUCCESS) CALL finish(routine, 'Deallocation of zo3_timint failed')
+     CASE(10)
+diff --git a/src/configure_model/mo_nml_crosscheck.f90 b/src/configure_model/mo_nml_crosscheck.f90
+index 6e8ee4c62f..e30e78b1b8 100644
+--- a/src/configure_model/mo_nml_crosscheck.f90
++++ b/src/configure_model/mo_nml_crosscheck.f90
+@@ -574,9 +574,6 @@ CONTAINS
+     IF ( irad_aero == iRadAeroCAMStd) THEN
+         CALL finish(routine,'CAMS forecast irad_aero=8 is currently not supported on GPU.')
+     END IF
+-    IF ( atm_phy_nwp_config(jg)%icpl_aero_gscp == 3 ) THEN
+-        CALL finish(routine,'Using cloud-droplet number climatology icpl_aero_gscp = 3 is currently not supported on GPU.')
+-    END IF
+ #endif
+ 
+     END IF
 diff --git a/src/shared/mo_idx_list.f90 b/src/shared/mo_idx_list.f90
 index fc4a24ddc6..4b9914f6aa 100644
 --- a/src/shared/mo_idx_list.f90
@@ -4804,790 +5928,5 @@ index 2f815f52a9..b0d4ebe17f 100644
  
  END MODULE mo_latitude_interpolation
 -- 
-2.34.1
-
-
-From 6fecaa29abd062eebfe5cfa0348588aebf4bcba9 Mon Sep 17 00:00:00 2001
-From: Annika Lauber <annika.lauber@c2sm.ethz.ch>
-Date: Mon, 16 Sep 2024 08:30:13 +0000
-Subject: [PATCH 2/4] GPU port of irad_o3=5
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
-
-See merge request icon/icon-nwp!1530
-
-Last Pipeline: https://gitlab.dkrz.de/icon/icon-nwp/-/pipelines/80939
-
-GPU port of the namelist switch `irad_o3=5`, which is part of the ICON-CLM setup and was added to the `c2sm_clm_r13b03_seaice` test case.
-
-Approved-by: Michael Jähn <michael.jaehn@env.ethz.ch>
-Merged-by: Ulrich Schaettler <ulrich.schaettler@dwd.de>
----
- run/exp.c2sm_clm_r13b03_seaice                | 20 ++-----------
- run/tolerance/hashes/balfrin_cpu_nvidia       |  2 +-
- run/tolerance/hashes/balfrin_cpu_nvidia_mixed |  2 +-
- src/atm_phy_schemes/mo_o3_util.f90            | 28 +++++++++++--------
- 4 files changed, 21 insertions(+), 31 deletions(-)
-
-diff --git a/run/exp.c2sm_clm_r13b03_seaice b/run/exp.c2sm_clm_r13b03_seaice
-index f2f7adca27..d71ff2eeaf 100644
---- a/run/exp.c2sm_clm_r13b03_seaice
-+++ b/run/exp.c2sm_clm_r13b03_seaice
-@@ -110,20 +110,6 @@ add_required_file ${latbc_path}/bc_greenhouse_rcp45_1765-2500.nc .
- add_required_file ${latbc_path}/LOWBC_1979_02.nc .
- add_required_file ${latbc_path}/LOWBC_1979_02.nc .
- 
--# Add required files for iRadAeroKinnVolcSP (irad_aero=18)
--add_required_file ${icon_data_poolFolder}/input/clm_r13b03_seaice/CMIP6Forcing/bc_aeropt_cmip6_volc_lw_b16_sw_b14_1979.nc .
--
--# - tropospheric anthropogenic aerosols, simple plumes
--add_link_file ${icon_data_poolFolder}/input/clm_r13b03_seaice/MACv2.0-SP_v1.nc                          ./MACv2.0-SP_v1.nc
--#
--# - Kinne background aerosols are needed for the year 1850 (irad_aero=18,19)
--#
--datadir=${icon_data_poolFolder}/input/clm_r13b03_seaice
--#
--add_link_file $datadir/bc_aeropt_kinne_lw_b16_coa.nc                    ./
--add_link_file $datadir/bc_aeropt_kinne_sw_b14_coa.nc                    ./
--add_link_file $datadir/bc_aeropt_kinne_sw_b14_fin_1850.nc               ./bc_aeropt_kinne_sw_b14_fin.nc
--
- icon_preprocessing_source=${icon_data_rootFolder}/grids/private/mpim/icon_preprocessing/source
- # boundary conditions
- # horizontal grid(s)
-@@ -376,8 +362,8 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
-  efdt_min_raylfric  = 7200.
-  itype_z0         = 2
-  icapdcycl        = 3
-- icpl_aero_conv   = 0
-- icpl_aero_gscp   = 0
-+ icpl_aero_conv   = 1
-+ icpl_aero_gscp   = 1
-  icpl_o3_tp       = 1
-  iprog_aero       = 0
-  dt_rad           = 2400
-@@ -445,7 +431,7 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
-   irad_cfc11  = 4           ! 4: from greenhouse gas scenario
-   irad_cfc12  = 4           ! 4: from greenhouse gas scenario
-   irad_o3     = 5
--  irad_aero   = 18
-+  irad_aero   = 6
-   albedo_type = 2          ! Modis albedo
-   direct_albedo = 4
-   albedo_whitecap = 1
-diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia b/run/tolerance/hashes/balfrin_cpu_nvidia
-index cad13dfdac..c86c37aa6b 100644
---- a/run/tolerance/hashes/balfrin_cpu_nvidia
-+++ b/run/tolerance/hashes/balfrin_cpu_nvidia
-@@ -4,7 +4,7 @@
- icon_data_rootFolder: /scratch/mch/jenkins/icon/pool/data/ICON
- builder: balfrin_cpu_nvidia
- # The list below maps each experiment to its current experiment_hash
--"c2sm_clm_r13b03_seaice": 9fd5125a6b74a8c7a7074fd41a5b7750ff303ac1
-+"c2sm_clm_r13b03_seaice": 7cbd84c9ee3d643e4220c6e25d7e98c337d8dadb
- "dwd_run_ICON_09_R2B4N5_EPS": 46a55885f52fc04e76038e717d451985f99aeb3a
- "mch_ch_lowres": 42647448335af146c69e6d3d39de5a75f45d00c0
- "mch_ch_r04b09_dace": f9a89c3a58593808d6d1c831826978d30b7e9072
-diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-index abda4e18b5..a2077e8971 100644
---- a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-+++ b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-@@ -4,7 +4,7 @@
- icon_data_rootFolder: /scratch/mch/jenkins/icon/pool/data/ICON
- builder: balfrin_cpu_nvidia_mixed
- # The list below maps each experiment to its current experiment_hash
--"c2sm_clm_r13b03_seaice": b456a4d8e10187a365b3aa78cee932c99a2e16b5
-+"c2sm_clm_r13b03_seaice": 806f8453008eb10f52f996f51d211622f275108e
- "mch_ch_lowres": d419a94fdb6e1353e16af48e85290d7a5d19be9e
- "mch_icon-ch1_small": 17e5e726d64b03a37564db2977567ebea45ac278
- "mch_icon-ch2_small": 6a673dea1dfef6f347438371a2859d08c1774440
-diff --git a/src/atm_phy_schemes/mo_o3_util.f90 b/src/atm_phy_schemes/mo_o3_util.f90
-index 95b519d97d..42abd3ac54 100644
---- a/src/atm_phy_schemes/mo_o3_util.f90
-+++ b/src/atm_phy_schemes/mo_o3_util.f90
-@@ -191,28 +191,32 @@ CONTAINS
- 
-         ALLOCATE(zo3_timint(nproma,ext_ozone(jg)%nplev_o3), STAT=istat)
-           IF(istat /= SUCCESS) CALL finish(routine, 'Allocation of zo3_timint failed')
-+        !$ACC ENTER DATA CREATE(zo3_timint)
- !$OMP PARALLEL
- !$OMP DO PRIVATE(jb,i_startidx,i_endidx) ICON_OMP_DEFAULT_SCHEDULE
-         DO jb = i_startblk,i_endblk
-           CALL get_indices_c(pt_patch,jb,i_startblk,i_endblk,i_startidx,i_endidx,rl_start,rl_end)
--          CALL o3_timeint(jcs = 1, jce = i_endidx, kbdim = nproma,       &
--               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         &
--               &          ext_o3       = ext_ozone(jg)%o3_plev(:,:,jb,:),&
--               &          current_date = mtime_datetime,                 &
--               &          o3_time_int  = zo3_timint                      ) ! OUT
-+          CALL o3_timeint(jcs = 1, jce = i_endidx, kbdim = nproma,       & ! IN
-+               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         & ! IN
-+               &          ext_o3       = ext_ozone(jg)%o3_plev(:,:,jb,:),& ! IN
-+               &          current_date = mtime_datetime,                 & ! IN
-+               &          o3_time_int  = zo3_timint,                     & ! OUT
-+               &          opt_use_acc  = .TRUE.                          )
-           CALL o3_pl2ml  (jcs = 1, jce = i_endidx, kbdim = nproma,       &
--               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         &
--               &          klev         = pt_patch%nlev,                  &
--               &          pfoz         = ext_ozone(jg)%plev_full_o3,     &
--               &          phoz         = ext_ozone(jg)%plev_half_o3,     &
--               &          ppf          = pt_diag%pres(:,:,jb),           &
--               &          pph          = pt_diag%pres_ifc(:,:,jb),       &
-+               &          nlev_pres    = ext_ozone(jg)%nplev_o3,         & ! IN
-+               &          klev         = pt_patch%nlev,                  & ! IN
-+               &          pfoz         = ext_ozone(jg)%plev_full_o3,     & ! IN
-+               &          phoz         = ext_ozone(jg)%plev_half_o3,     & ! IN
-+               &          ppf          = pt_diag%pres(:,:,jb),           & ! IN
-+               &          pph          = pt_diag%pres_ifc(:,:,jb),       & ! IN
-                &          o3_time_int  = zo3_timint,                     & ! IN
--               &          o3_clim      = o3(:,:,jb)                      ) ! OUT ozone mass mixing ratio [kg/kg]
-+               &          o3_clim      = o3(:,:,jb),                     & ! OUT ozone mass mixing ratio [kg/kg]
-+               &          opt_use_acc  = .TRUE.                          )
-         ENDDO !jb
- !$OMP END DO NOWAIT
- !$OMP END PARALLEL
- 
-+      !$ACC EXIT DATA DELETE(zo3_timint)
-       DEALLOCATE(zo3_timint, STAT=istat)
-         IF(istat /= SUCCESS) CALL finish(routine, 'Deallocation of zo3_timint failed')
-     CASE(10)
--- 
-2.34.1
-
-
-From 337ea4a3e28991e358fef2eb1198ad50d3f007fc Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Michael=20J=C3=A4hn?= <michael.jaehn@env.ethz.ch>
-Date: Fri, 27 Sep 2024 06:46:40 +0000
-Subject: [PATCH 3/4] [nwp] GPU port for icpl_aero_gscp = 3
-
-See merge request icon/icon-nwp!1520
-
-For the official ICON-CLM setup, the following switch was ported to GPU: `icpl_aero_gscp = 3` (MODIS climatology for cloud-droplet number)
-
-Approved-by: Jonas Jucker <jonas.jucker@env.ethz.ch>
-Merged-by: Daniel Rieger <daniel.rieger@dwd.de>
----
- run/exp.c2sm_clm_r13b03_seaice                | 22 +++++++++++++++----
- run/tolerance/hashes/balfrin_cpu_nvidia       |  2 +-
- run/tolerance/hashes/balfrin_cpu_nvidia_mixed |  2 +-
- src/atm_phy_nwp/mo_nwp_gscp_interface.f90     |  3 +++
- src/configure_model/mo_nml_crosscheck.f90     |  3 ---
- 5 files changed, 23 insertions(+), 9 deletions(-)
-
-diff --git a/run/exp.c2sm_clm_r13b03_seaice b/run/exp.c2sm_clm_r13b03_seaice
-index d71ff2eeaf..4f4d6416fc 100644
---- a/run/exp.c2sm_clm_r13b03_seaice
-+++ b/run/exp.c2sm_clm_r13b03_seaice
-@@ -76,7 +76,7 @@ atmo_namelist=NAMELIST_${EXPNAME}_atm
- # Get required files together
- # ========================
- 
--extpar_filename="external_parameter_icon_baltic_sea_DOM01_tiles.nc"
-+extpar_filename="external_parameter_icon_baltic_sea_DOM01_tiles_cdnc.nc"
- add_required_file "${grids_folder}/${extpar_filename}" ./
- 
- # files needed for radiation
-@@ -110,6 +110,20 @@ add_required_file ${latbc_path}/bc_greenhouse_rcp45_1765-2500.nc .
- add_required_file ${latbc_path}/LOWBC_1979_02.nc .
- add_required_file ${latbc_path}/LOWBC_1979_02.nc .
- 
-+# Add required files for iRadAeroKinnVolcSP (irad_aero=18)
-+add_required_file ${icon_data_poolFolder}/input/clm_r13b03_seaice/CMIP6Forcing/bc_aeropt_cmip6_volc_lw_b16_sw_b14_1979.nc .
-+
-+# - tropospheric anthropogenic aerosols, simple plumes
-+add_link_file ${icon_data_poolFolder}/input/clm_r13b03_seaice/MACv2.0-SP_v1.nc                          ./MACv2.0-SP_v1.nc
-+#
-+# - Kinne background aerosols are needed for the year 1850 (irad_aero=18,19)
-+#
-+datadir=${icon_data_poolFolder}/input/clm_r13b03_seaice
-+#
-+add_link_file $datadir/bc_aeropt_kinne_lw_b16_coa.nc                    ./
-+add_link_file $datadir/bc_aeropt_kinne_sw_b14_coa.nc                    ./
-+add_link_file $datadir/bc_aeropt_kinne_sw_b14_fin_1850.nc               ./bc_aeropt_kinne_sw_b14_fin.nc
-+
- icon_preprocessing_source=${icon_data_rootFolder}/grids/private/mpim/icon_preprocessing/source
- # boundary conditions
- # horizontal grid(s)
-@@ -362,8 +376,8 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
-  efdt_min_raylfric  = 7200.
-  itype_z0         = 2
-  icapdcycl        = 3
-- icpl_aero_conv   = 1
-- icpl_aero_gscp   = 1
-+ icpl_aero_conv   = 0 
-+ icpl_aero_gscp   = 3
-  icpl_o3_tp       = 1
-  iprog_aero       = 0
-  dt_rad           = 2400
-@@ -431,7 +445,7 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
-   irad_cfc11  = 4           ! 4: from greenhouse gas scenario
-   irad_cfc12  = 4           ! 4: from greenhouse gas scenario
-   irad_o3     = 5
--  irad_aero   = 6
-+  irad_aero   = 18
-   albedo_type = 2          ! Modis albedo
-   direct_albedo = 4
-   albedo_whitecap = 1
-diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia b/run/tolerance/hashes/balfrin_cpu_nvidia
-index c86c37aa6b..0f888f4633 100644
---- a/run/tolerance/hashes/balfrin_cpu_nvidia
-+++ b/run/tolerance/hashes/balfrin_cpu_nvidia
-@@ -4,7 +4,7 @@
- icon_data_rootFolder: /scratch/mch/jenkins/icon/pool/data/ICON
- builder: balfrin_cpu_nvidia
- # The list below maps each experiment to its current experiment_hash
--"c2sm_clm_r13b03_seaice": 7cbd84c9ee3d643e4220c6e25d7e98c337d8dadb
-+"c2sm_clm_r13b03_seaice": 0e637033c7d2f00f83e1ca8d77367fbb1535f009
- "dwd_run_ICON_09_R2B4N5_EPS": 46a55885f52fc04e76038e717d451985f99aeb3a
- "mch_ch_lowres": 42647448335af146c69e6d3d39de5a75f45d00c0
- "mch_ch_r04b09_dace": f9a89c3a58593808d6d1c831826978d30b7e9072
-diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-index a2077e8971..f7ed4705cb 100644
---- a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-+++ b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-@@ -4,7 +4,7 @@
- icon_data_rootFolder: /scratch/mch/jenkins/icon/pool/data/ICON
- builder: balfrin_cpu_nvidia_mixed
- # The list below maps each experiment to its current experiment_hash
--"c2sm_clm_r13b03_seaice": 806f8453008eb10f52f996f51d211622f275108e
-+"c2sm_clm_r13b03_seaice": c46149b2051f7cbde4eb33809398221a430c4788
- "mch_ch_lowres": d419a94fdb6e1353e16af48e85290d7a5d19be9e
- "mch_icon-ch1_small": 17e5e726d64b03a37564db2977567ebea45ac278
- "mch_icon-ch2_small": 6a673dea1dfef6f347438371a2859d08c1774440
-diff --git a/src/atm_phy_nwp/mo_nwp_gscp_interface.f90 b/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
-index 5dc76a28a5..30d7c96f71 100644
---- a/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
-+++ b/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
-@@ -319,9 +319,12 @@ CONTAINS
-           ENDIF
- 
-         ELSE IF (atm_phy_nwp_config(jg)%icpl_aero_gscp == 3) THEN
-+          !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1)
-+          !$ACC LOOP GANG VECTOR
-           DO jc=i_startidx,i_endidx
-             qnc_s(jc) = prm_diag%cloud_num(jc,jb)
-           END DO
-+          !$ACC END PARALLEL
- 
-         ELSE
- 
-diff --git a/src/configure_model/mo_nml_crosscheck.f90 b/src/configure_model/mo_nml_crosscheck.f90
-index 6e8ee4c62f..e30e78b1b8 100644
---- a/src/configure_model/mo_nml_crosscheck.f90
-+++ b/src/configure_model/mo_nml_crosscheck.f90
-@@ -574,9 +574,6 @@ CONTAINS
-     IF ( irad_aero == iRadAeroCAMStd) THEN
-         CALL finish(routine,'CAMS forecast irad_aero=8 is currently not supported on GPU.')
-     END IF
--    IF ( atm_phy_nwp_config(jg)%icpl_aero_gscp == 3 ) THEN
--        CALL finish(routine,'Using cloud-droplet number climatology icpl_aero_gscp = 3 is currently not supported on GPU.')
--    END IF
- #endif
- 
-     END IF
--- 
-2.34.1
-
-
-From 47c424a738587adebeb6f2a2f57910dc8cb174af Mon Sep 17 00:00:00 2001
-From: Christopher Purr <christopher.purr@dwd.de>
-Date: Thu, 14 Nov 2024 17:20:51 +0000
-Subject: [PATCH 4/4] [nwp] GPU port of the diagnosis of planetary boundary
- layer height
-
-See merge request icon/icon-nwp!1560
-
-The calculation of the planetary boundary layer height is ported to GPU. The calculation is purely diagnostic. This feature is necessary for regional climate simulations using ICON-CLM.
-
-(The `dwd_run_ICON_09_R2B4N5_EPS` test case was removed from Balfrin (still running on Horeka). Random segmentation faults of this case on Balfrin hint to a compiler issue.)
-
-(All tolerance hashes on Balfrin were brought up do date. There has been some undetected divergence in the past with marginally changed CPU results)
-
-Approved-by: Marek Jacob <1129-b380572@users.noreply.gitlab.dkrz.de>
-Merged-by: Daniel Rieger <377-m300368@users.noreply.gitlab.dkrz.de>
----
- run/checksuite.clm/clmexp.ICON_CLM            |   2 +-
- run/exp.c2sm_clm_r13b03_seaice                |   2 +-
- run/tolerance/hashes/balfrin_cpu_nvidia       |  33 ++-
- run/tolerance/hashes/balfrin_cpu_nvidia_mixed |  28 +--
- run/tolerance/pp.collect_selected_members     |  61 +++++
- scripts/experiments/c2sm/mch_tests.yml        | 221 ++++++++++++++++++
- src/atm_phy_nwp/mo_nwp_diagnosis.f90          |  18 +-
- src/atm_phy_nwp/mo_nwp_phy_state.f90          |   9 +-
- 8 files changed, 324 insertions(+), 50 deletions(-)
- create mode 100644 run/tolerance/pp.collect_selected_members
- create mode 100644 scripts/experiments/c2sm/mch_tests.yml
-
-diff --git a/run/checksuite.clm/clmexp.ICON_CLM b/run/checksuite.clm/clmexp.ICON_CLM
-index a462d9bef0..8cd3114188 100644
---- a/run/checksuite.clm/clmexp.ICON_CLM
-+++ b/run/checksuite.clm/clmexp.ICON_CLM
-@@ -209,7 +209,7 @@ cat > NAMELIST_${EXPID} << EOF
-   output_filename              = '${EXPID}_out01'
-   filename_format              = '<output_filename>_<datetime2>'
-   operation                    = ""
--  ml_varlist                   = 'alb_si','fr_seaice','t_g','aod_550nm' ! reduced list for buildbot
-+  ml_varlist                   = 'alb_si','fr_seaice','t_g','aod_550nm','hpbl' ! reduced list for buildbot
-   output_grid                  =  .TRUE.
- !	 stream_partitions_ml         =  2
- /
-diff --git a/run/exp.c2sm_clm_r13b03_seaice b/run/exp.c2sm_clm_r13b03_seaice
-index 4f4d6416fc..82c3c311e6 100644
---- a/run/exp.c2sm_clm_r13b03_seaice
-+++ b/run/exp.c2sm_clm_r13b03_seaice
-@@ -431,7 +431,7 @@ cat > ${basedir}/run/${atmo_namelist} << EOF
-   'ddt_temp_pconv','ddt_u_turb','ddt_u_sso','ddt_u_pconv','ddt_v_turb','ddt_v_sso',
-   'ddt_qv_turb','ddt_qc_turb','ddt_qv_conv','ddt_qc_conv','ddt_tke','ddt_tke_pconv','ddt_tke_hsh','qv_s',
-   'runoff_g','plantevap','t_snow','rho_snow','h_snow','freshsnow','ddt_vn_adv','ddt_vn_pgr','exner',
--  'h_ice','t_ice','alb_si'
-+  'h_ice','t_ice','alb_si','hpbl'
- /
- 
- ! radiation_nml: radiation scheme ---------------------------------------------
-diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia b/run/tolerance/hashes/balfrin_cpu_nvidia
-index 0f888f4633..d46e5cc71f 100644
---- a/run/tolerance/hashes/balfrin_cpu_nvidia
-+++ b/run/tolerance/hashes/balfrin_cpu_nvidia
-@@ -4,21 +4,20 @@
- icon_data_rootFolder: /scratch/mch/jenkins/icon/pool/data/ICON
- builder: balfrin_cpu_nvidia
- # The list below maps each experiment to its current experiment_hash
--"c2sm_clm_r13b03_seaice": 0e637033c7d2f00f83e1ca8d77367fbb1535f009
--"dwd_run_ICON_09_R2B4N5_EPS": 46a55885f52fc04e76038e717d451985f99aeb3a
--"mch_ch_lowres": 42647448335af146c69e6d3d39de5a75f45d00c0
-+"c2sm_clm_r13b03_seaice": 5e90302839fb503bbddee997a0d74042b42a80d7
-+"mch_ch_lowres": fa586307a864e27c983a6930624a8945126aef97
- "mch_ch_r04b09_dace": f9a89c3a58593808d6d1c831826978d30b7e9072
--"mch_icon-ch1_small": 4fc448b0c06a291afd59c7f46517c776e878382f
--"mch_icon-ch2_small": a0ba460c747d1bf0966bb8d09ec0dcedea594e94
--"mch_kenda-ch1_dev2_small": 3724e9fc234ef18e8df7d1c3a5c52a159ebbd4a4
--"mch_kenda-ch1_dev_small": 7e03087162564ac7ddf9fe844436ba3c22c431c9
--"mch_kenda-ch1_small": 8b35a55203f5100fe364886801c79c2df689ddd3
--"mch_opr_r04b07": f920ef95153118f55169a18e431be20845f24047
--"mch_opr_r04b07_lhn_00": 197f409bcdd22389118f4e1690be6cce4964f8da
--"mch_opr_r04b07_lhn_12_emvorado": a731b21cb4f850e81e740915dfcdbbf475859f46
--"mch_opr_r04b07_nest": 6b0cad845573d9838edb4ed493acff6c50de4eac
--"mch_opr_r04b07_sstice_inst": e9d23760ce396b8b526718d1b811bc79debb911f
--"mch_opr_r19b07_lpi": 8b07776a2976be69a9b44352b9fdc6ad8af32103
--"mch_opr_r19b07_midnight": 7f7a5d8991caf3a4d673e962dd4cea00fd417415
--"mch_opr_r19b07_turb": fde1eb0b2083eb1a8a4c48e5da9fa3e86c512a18
--"mch_pollen_test": f2e9c55626dadf3e83802f8d22d46697bd46286c
-+"mch_icon-ch1_small": a8feb093cc3eb7a549d04ddab2024be8dc583695
-+"mch_icon-ch2_small": 63085b0de00828999cc9fd99e8ae11b75c1c76af
-+"mch_kenda-ch1_dev2_small": 10874495ad2f486a76677f6d542b8fdc13a4d237
-+"mch_kenda-ch1_dev_small": de60838c35b794ee6c4f69fb4b6b96f17f70b5d6
-+"mch_kenda-ch1_small": c9c633ed825f87b9bde8abc45f4bbd3a54b8bc09
-+"mch_opr_r04b07": 174c502ef9b15a5d725f74690a820ea58e3234a7
-+"mch_opr_r04b07_lhn_00": fa2ebc083ae7c0e98dc040cf3ee5910e10c351a7
-+"mch_opr_r04b07_lhn_12_emvorado": 6d7521e484dd4cb91d392a075ff29cce755f86bd
-+"mch_opr_r04b07_nest": c661c73ba3330d8a214c9623feb873356d790ecc
-+"mch_opr_r04b07_sstice_inst": 9339f702e481442b1881c4a73a6d20eb3541e438
-+"mch_opr_r19b07_lpi": 0fcfd0f6dbed76ffc13a8118426e5de96639edbf
-+"mch_opr_r19b07_midnight": bf790f3bb36471981e17c947c33b8fa209a89e23
-+"mch_opr_r19b07_turb": 3a34fa17db63e74c3b3bbba1a849daea8a72ee58
-+"mch_pollen_test": fa0db7ad6c5ed86993f40303896ba89bb770f698
-diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-index f7ed4705cb..caa6077eb2 100644
---- a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-+++ b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-@@ -4,17 +4,17 @@
- icon_data_rootFolder: /scratch/mch/jenkins/icon/pool/data/ICON
- builder: balfrin_cpu_nvidia_mixed
- # The list below maps each experiment to its current experiment_hash
--"c2sm_clm_r13b03_seaice": c46149b2051f7cbde4eb33809398221a430c4788
--"mch_ch_lowres": d419a94fdb6e1353e16af48e85290d7a5d19be9e
--"mch_icon-ch1_small": 17e5e726d64b03a37564db2977567ebea45ac278
--"mch_icon-ch2_small": 6a673dea1dfef6f347438371a2859d08c1774440
--"mch_kenda-ch1_small": 1227aab850827c3bf115b43c62887db1310f9a6f
--"mch_opr_r04b07": e7b4f1da538ec5c2a4670a31d42884728a127ded
--"mch_opr_r04b07_lhn_00": 59d9532e83cc1a2338cc170e98f4e56cf6d392f3
--"mch_opr_r04b07_lhn_12_emvorado": 8fcee2531ef205166686bfd6c91ae84584fffe32
--"mch_opr_r04b07_nest": 7112c2b7c7c8ce7dd67bf2bac42234dcc59a65b9
--"mch_opr_r04b07_sstice_inst": 171821f3235cb660d0cb202f31ce42f32a3f82e5
--"mch_opr_r19b07_lpi": 4fea14f580da4f98368e334db9c066c0d65d9872
--"mch_opr_r19b07_midnight": e0affabd714edef4815b89e049450bab5284eeee
--"mch_opr_r19b07_turb": 541cbaf5a8548d74f335abe00b3858a95968f51a
--"mch_pollen_test": b530b762ce22984d8f9e3628671b17619c48cfe8
-+"c2sm_clm_r13b03_seaice": 0044fa8308dfd14933947cf929baae2207db7bc8
-+"mch_ch_lowres": 908b533ec19a862ed492f32140be771b61f10c10
-+"mch_icon-ch1_small": 7d691af6dbcaeb24a0523ffcdd9a5efb7da212b6
-+"mch_icon-ch2_small": a7b843a5932341b168da5f7c3491dea1c10fcf64
-+"mch_kenda-ch1_small": a13a6460ab656eecf8bb20929e3fcd990d35da29
-+"mch_opr_r04b07": ae70b425b411d2bbae7af55546dbc3fe1a08a8a0
-+"mch_opr_r04b07_lhn_00": 70d0ce788ba73ae30fc8902ac8315a5d06b05d6c
-+"mch_opr_r04b07_lhn_12_emvorado": 3ecf290c663b1d91ecb057b890a04125a3e4db67
-+"mch_opr_r04b07_nest": 59306497de70a77e472c45a529eef8c6fad246e2
-+"mch_opr_r04b07_sstice_inst": 028149427c74159f76a372c89353fccb561aff6d
-+"mch_opr_r19b07_lpi": 32b4bbbea0d03be8a51e1b0ef2e22cf0e3a17d7a
-+"mch_opr_r19b07_midnight": c67ddc1291d2ab669ca0bc290dd5dbeeabd77e08
-+"mch_opr_r19b07_turb": c6e1d37341c0e37694e3ac4d23b2ccddee2ab9ca
-+"mch_pollen_test": 3c959a9199669b43abb1366a1f15e8b768f7a8f0
-diff --git a/run/tolerance/pp.collect_selected_members b/run/tolerance/pp.collect_selected_members
-new file mode 100644
-index 0000000000..96986c2f5f
---- /dev/null
-+++ b/run/tolerance/pp.collect_selected_members
-@@ -0,0 +1,61 @@
-+#!/bin/bash
-+
-+# ICON
-+#
-+# ------------------------------------------
-+# Copyright (C) 2004-2024, DWD, MPI-M, DKRZ, KIT, ETH, MeteoSwiss
-+# Contact information: icon-model.org
-+# See AUTHORS.TXT for a list of authors
-+# See LICENSES/ for license information
-+# SPDX-License-Identifier: BSD-3-Clause
-+# ------------------------------------------
-+
-+set -euo pipefail
-+
-+# This script runs the member selection for probtest
-+
-+
-+# Variables passed via list_probtest -> addexp/runexp -> create_target_header
-+#
-+# tolerance_experiments : comma separated list of experiments
-+# basedir : the directory where ICON has been build in.
-+
-+# make sure the resulting data and directories are global readable
-+umask 0022
-+
-+# generating iterable array of builders
-+IFS=',' read -ra experiments <<< "${tolerance_experiments}"
-+
-+# Sort experiments in alphabetic order
-+sorted_experiments=($(for exp in "${experiments[@]}"; do echo $exp; done | sort))
-+
-+# Please don't change these path/file names. They are used by buildbot.
-+yaml_path=scripts/experiments
-+
-+# Update the selected members in the corresponding file 
-+echo ""
-+echo "Please update or add the following lines with the selected members and the "
-+echo "tolerance factor (if not the default value of 5) to the corresponding experiment "
-+echo "in '${yaml_path}/<group>/<test-type>_tests.yml'."
-+echo "If any of the experiments is not yet in the list, please add it in alphabetical order."
-+echo ""
-+for exp in "${sorted_experiments[@]}"; do
-+    if [ -f "${basedir}/${exp}_selected_members.csv" ]; then
-+        selected_members=$(sed -n '1p' "${basedir}/${exp}_selected_members.csv")
-+        export_factor=$(sed -n '2p' "${basedir}/${exp}_selected_members.csv")
-+        # Extract the factor from the second line
-+        factor=$(echo "$export_factor" | grep -oE '[0-9]+')
-+        echo "- name: ${exp}"
-+        echo "  ensemble_num:"
-+        echo "    - ${BB_NAME}: $selected_members"
-+        echo "  tolerance_factor:"
-+        echo "    - ${BB_SYSTEM}: $factor"
-+        echo ""
-+    else
-+        echo "WARNING: The member selection failed for ${exp}."
-+        echo ""
-+    fi
-+done
-+
-+# exit 0 on success (and don't execute any appended scripts)
-+exit 0
-diff --git a/scripts/experiments/c2sm/mch_tests.yml b/scripts/experiments/c2sm/mch_tests.yml
-new file mode 100644
-index 0000000000..aec987831c
---- /dev/null
-+++ b/scripts/experiments/c2sm/mch_tests.yml
-@@ -0,0 +1,221 @@
-+# ICON
-+#
-+# ------------------------------------------
-+# Copyright (C) 2004-2024, DWD, MPI-M, DKRZ, KIT, ETH, MeteoSwiss
-+# Contact information: icon-model.org
-+# See AUTHORS.TXT for a list of authors
-+# See LICENSES/ for license information
-+# SPDX-License-Identifier: BSD-3-Clause
-+# ------------------------------------------
-+
-+tests:
-+  - name: mch_ch_lowres
-+    tags: ['atm', 'merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [25,12,13,20,19]
-+      - balfrin_cpu_nvidia_mixed: [1,30,35,44,13,14]
-+  - name: mch_ch_r04b09_dace
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_cpu_nvidia', 'balfrin_gpu_nvidia']
-+    refgen: ['balfrin_cpu_nvidia']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num: # Use 1 ensemble member as the tolerances are 0
-+      - balfrin_cpu_nvidia: [1]
-+  - name: mch_ch_r04b09_dace_synsat
-+    tags: ['atm','merge2rc','probtest']
-+    checksuite_modes:
-+        - horeka: 't'
-+    machines:
-+      - name: horeka
-+        include_only: ['horeka_cpu_nvhpc','horeka_gpu_nvhpc']
-+    refgen: ['horeka_cpu_nvhpc']
-+    ensemble_num:
-+      - horeka_cpu_nvhpc: [25,12,13,20,19]
-+  - name: mch_kenda-ch1_small
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 'tc'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [11,9,44,46,13]
-+      - balfrin_cpu_nvidia_mixed: [26,4,15,50,47,46]
-+    tolerance_factor:
-+      - balfrin: 5
-+  - name: mch_pollen_test
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [25,12,13,20,19]
-+      - balfrin_cpu_nvidia_mixed: [18,7,49,45,28]
-+  - name: mch_icon-ch1
-+    tags: ['mch-opr']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_gpu_nvidia_mixed', 'alps_mch_test_gpu']
-+        runflags: ['cpu_time=02:00:00']
-+    checksuite_modes:
-+      - balfrin: 'pg'
-+  - name: mch_icon-ch1_small
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [50,21,39,38,15]
-+      - balfrin_cpu_nvidia_mixed: [50,21,40,39,16]
-+  - name: mch_icon-ch2
-+    tags: ['mch-opr']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_gpu_nvidia_mixed', 'alps_mch_test_gpu']
-+        runflags: ['cpu_time=01:20:00']
-+    checksuite_modes:
-+      - balfrin: 'p'
-+  - name: mch_icon-ch2_small
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 'tg'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [25,46,27,32,4]
-+      - balfrin_cpu_nvidia_mixed: [36,34,1,26,11,22,16,13]
-+  - name: mch_kenda-ch1
-+    tags: ['mch-opr']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_gpu_nvidia_mixed', 'alps_mch_test_gpu']
-+        runflags: ['cpu_time=00:20:00']
-+    checksuite_modes:
-+      - balfrin: 'p'
-+  - name: mch_opr_r04b07
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [18,48,43,37,32,25]
-+      - balfrin_cpu_nvidia_mixed: [32,11,18,20,24,46,47]
-+  - name: mch_opr_r04b07_lhn_00
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [19,43,31,1,25,33,20,4,7,2,50,5,46,30,3]
-+      - balfrin_cpu_nvidia_mixed: [21,27,13,37,24,50,49,12,11]
-+    tolerance_factor:
-+      - balfrin: 10
-+  - name: mch_opr_r04b07_lhn_12_emvorado
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    checksuite_modes:
-+      - balfrin: 't'
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [36,2,28,40,25,27,18,34,33,47,9]
-+      - balfrin_cpu_nvidia_mixed: [13,42,47,24,11,28,45,1,8,17,3,49,39,20,46]
-+    tolerance_factor:
-+      - balfrin: 10
-+  - name: mch_opr_r04b07_nest
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 'rt'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [17,9,49,46,28]
-+      - balfrin_cpu_nvidia_mixed: [38,22,48,19,37]
-+    tolerance_factor:
-+      - balfrin: 5
-+  - name: mch_opr_r04b07_performance
-+    tags: ['atm','merge2rc']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_gpu_nvidia_mixed']
-+    checksuite_modes:
-+      - balfrin: 'p'
-+  - name: mch_opr_r04b07_sstice_inst
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [25,12,13,20,19]
-+      - balfrin_cpu_nvidia_mixed: [50,20,40,39,15]
-+  - name: mch_opr_r19b07_lpi
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    refgen: ['balfrin_cpu_nvidia','balfrin_cpu_nvidia_mixed','alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [25,42,14,45,47,46,23,39,17]
-+      - balfrin_cpu_nvidia_mixed: [14,48,33,45,35,31,39,6,8,13,38,7,21,32]
-+  - name: mch_opr_r19b07_midnight
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
-+    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 't'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [29,46,32,35,4]
-+      - balfrin_cpu_nvidia_mixed: [26,39,25,5,35,6,3,47]
-+  - name: mch_opr_r19b07_turb
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+    checksuite_modes:
-+      - balfrin: 't'
-+    refgen: ['balfrin_cpu_nvidia', 'balfrin_cpu_nvidia_mixed', 'alps_mch_test_cpu']
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [20,9,49,46,28]
-+      - balfrin_cpu_nvidia_mixed: [17,38,7,24,23,21,50]
-+  - name: mch_kenda-ch1_dev_small
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_cpu_nvidia', 'balfrin_gpu', 'alps_mch_test_cpu', 'alps_mch_test_gpu']
-+    refgen: ['balfrin_cpu_nvidia', 'alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 'tc'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [18,46,37,23,28]
-+  - name: mch_kenda-ch1_dev2_small
-+    tags: ['atm','merge2rc','probtest']
-+    machines:
-+      - name: balfrin
-+        include_only: ['balfrin_cpu_nvidia', 'balfrin_gpu', 'alps_mch_test_cpu', 'alps_mch_test_gpu']
-+    refgen: ['balfrin_cpu_nvidia', 'alps_mch_test_cpu']
-+    checksuite_modes:
-+      - balfrin: 'tc'
-+    ensemble_num:
-+      - balfrin_cpu_nvidia: [26,28,48,29,46]
-diff --git a/src/atm_phy_nwp/mo_nwp_diagnosis.f90 b/src/atm_phy_nwp/mo_nwp_diagnosis.f90
-index 3e5a408a1c..7f9e08d108 100644
---- a/src/atm_phy_nwp/mo_nwp_diagnosis.f90
-+++ b/src/atm_phy_nwp/mo_nwp_diagnosis.f90
-@@ -1432,8 +1432,8 @@ CONTAINS
- 
-     IF (ltimer) CALL timer_start(timer_nh_diagnostics)
- 
--    !$ACC DATA CREATE(ztp, zqp, mlab) PRESENT(p_metrics, pt_prog_rcf, pt_diag) &
--    !$ACC   PRESENT(lnd_diag, p_prog_wtr_now, ext_data, prm_diag) IF(lzacc)
-+    !$ACC DATA CREATE(ztp, zqp, mlab, ri_no) PRESENT(p_metrics, pt_prog_rcf, pt_diag) &
-+    !$ACC   PRESENT(lnd_diag, p_prog_wtr_now, ext_data, pt_prog, prm_diag) IF(lzacc)
- 
-     i_nchdom  = MAX(1,pt_patch%n_childdom)
-     jg        = pt_patch%id
-@@ -1645,18 +1645,16 @@ CONTAINS
-       !  atm_phy_les/mo_turbulent_diagnostic.f90
- 
-        IF (var_in_output(jg)%hpbl) THEN
--
--#ifdef _OPENACC
--         CALL finish(routine, 'PBL diagnosis not ported to GPU.')
--#endif
--
-+        !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
-+        !$ACC LOOP GANG(STATIC: 1) VECTOR
-         DO jc = i_startidx, i_endidx
-          ri_no(jc,nlev) = missing_value_hpbl
-         ENDDO
- 
--
-+        !$ACC LOOP SEQ
-         DO jk = nlev-1, kstart_moist, -1
--         DO jc = i_startidx, i_endidx
-+          !$ACC LOOP GANG(STATIC: 1) VECTOR
-+          DO jc = i_startidx, i_endidx
- 
-             ri_no(jc,jk) = (grav/pt_prog%theta_v(jc,nlev,jb)) * &
-               &      ( pt_prog%theta_v(jc,jk,jb)-pt_prog%theta_v(jc,nlev,jb) ) *  &
-@@ -1674,7 +1672,7 @@ CONTAINS
- 
-           END DO
-         END DO
--
-+        !$ACC END PARALLEL
-       ENDIF
- 
- 
-diff --git a/src/atm_phy_nwp/mo_nwp_phy_state.f90 b/src/atm_phy_nwp/mo_nwp_phy_state.f90
-index 3fc7fef192..99b1b0028d 100644
---- a/src/atm_phy_nwp/mo_nwp_phy_state.f90
-+++ b/src/atm_phy_nwp/mo_nwp_phy_state.f90
-@@ -1253,18 +1253,13 @@ SUBROUTINE new_nwp_phy_diag_list( k_jg, klev, klevp1, kblks,    &
- 
-     IF ( var_in_output%hpbl ) THEN
- 
--#ifdef _OPENACC
--      CALL finish ('mo_nwp_phy_state:new_nwp_phy_diag_list', &
--        'hpbl calculation not ported to GPU')
--#endif
--
-       cf_desc    = t_cf_var('hpbl', 'm', 'boundary layer height above sea level', &
-            &                datatype_flt)
-       grib2_desc = grib2_var(0, 3, 18, ibits, GRID_UNSTRUCTURED, GRID_CELL)
-       CALL add_var( diag_list, 'hpbl', diag%hpbl,                             &
-         & GRID_UNSTRUCTURED_CELL, ZA_CLOUD_TOP, cf_desc, grib2_desc,            &
--        & ldims=shape2d, lrestart=.FALSE. )
--
-+        & ldims=shape2d, lrestart=.FALSE.,lopenacc=.TRUE.  )
-+      __acc_attach(diag%hpbl)
-     ENDIF
- 
- 
--- 
-2.34.1
+2.35.3
 
