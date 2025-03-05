@@ -228,27 +228,33 @@ DTIME=
 ZML_SOIL="0.005,0.025,0.07,0.16,0.34,0.7,1.42,2.86,5.74,11.5"    # soil level
 
 #... Output ICON:
-HOUT_INC=(03:00:00 24:00:00 01:00:00 24:00:00 06:00:00 06:00:00 01:00:00 01:00:00 01:00:00 01:00:00) # time increment for each output_nml [HH:MM:SS]
+HOUT_INC=(03:00:00 01:00:00 06:00:00 01:00:00 01:00:00 06:00:00 24:00:00 24:00:00 01:00:00 01:00:00 06:00:00 06:00:00 03:00:00) # time increment for each output_nml [HH:MM:SS]
 PRECIP_INTERVAL=PT01H # interval for accumulating tot_prec in ISO8601 (needs to be consistent with HOUT_INC above)
-RUNOFF_INTERVAL=PT01H # interval for accumulating runoff in ISO8601 (needs to be consistent with HOUT_INC above)
+RUNOFF_INTERVAL=PT06H # interval for accumulating runoff in ISO8601 (needs to be consistent with HOUT_INC above)
 SUNSHINE_INTERVAL=PT24H # interval for accumulating sunshine duration in ISO8601 (needs to be consistent with HOUT_INC above)
 MAXT_INTERVAL=PT24H # interval for min/max of 2m-temperature in ISO8601 (needs to be consistent with HOUT_INC above)
-GUST_INTERVAL=PT01H # interval for maximum of gust in 10m in ISO8601 (needs to be consistent with HOUT_INC above)
-MELT_INTERVAL=PT01H # interval for accumulating snow_melt in ISO8601 (needs to be consistent with HOUT_INC above)
-OPERATION=("" "" "" "" "" "" "" "mean" "" "") # operation parameter (this is just a work around until ICON-CLM gets a proper netCDF-CF output)
+GUST_INTERVAL=PT24H # interval for maximum of gust in 10m in ISO8601 (needs to be consistent with HOUT_INC above)
+MELT_INTERVAL=PT06H # interval for accumulating snow_melt in ISO8601 (needs to be consistent with HOUT_INC above)
+OPERATION=("" "mean" "mean" "" "" "" "" "" "max" "" "" "" "") # operation parameter (this is just a work around until ICON-CLM gets a proper netCDF-CF output) 
 NESTING_STREAM=1  # If you want to use an output stream to save quantities as input for further downscaling put the number of the output stream here.
                #   This chosen output stream is saved as is. Default = 0 means no output stream is saved as input for further downscaling.
                #   This output stream cannot be used in post.job.sh for building time series
 #... definition of pressure, altitude and height levels for building time series in post.job.sh
 PLEVS=(200. 300. 500. 700. 850. 925. 950.)   #List of pressure levels. Must be the same as or a subset
+PLEVS_NUK=(300. 500. 700. 950.)
                                         #of the p_levels in icon namelist !! BUT: in hPa instead of Pa !!
 ZLEVS=(10.0 34.5 69.0 116.0 178.5 258.5 357.5 477.0) #List of altitude levels (height over NN).
                                                      #Must be the same as or a subset of the h_levels in icon namelist
 #... interpolation to vertical height levels above topography
 #      this needs an extra output stream and the quantities z_mc ad topography_c in the output stream of the constant data
-export HLEV_STREAM=10  # output stream that contains 4D prognostic quantities that has to be interpolated
+export HLEV_STREAM=9  # output stream that contains 4D prognostic quantities that has to be interpolated
                        # In case HLEV_STREAM=0 no vertical interpolation will be performed
-HLEVS=(10.0 34.5 69.0 116.0 178.5 258.5 357.5 477.0)
+HLEVS=(50.0 100.0 250.0 500.0)
+
+# Select level range UpperLevel - LowerLevel for HLEV_STREAM
+UL=47
+LL=59
+LEVELS=${UL}...${LL}
 
 #===============================================================================
 #   Global attribute settings in the ICON netCDF output

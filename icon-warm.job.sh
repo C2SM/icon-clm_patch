@@ -446,197 +446,341 @@ cat > NAMELIST_${EXPID} << EOF
   restart_write_mode="${RESTART_WRITE_MODE}"
 /
 &output_nml
-!-----------------------------------------------------------Output Namelist 1
+!---------------------------------Output Namelist 1: 3hrs
   filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
   dom                          =  1            ! write all domains
   output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
   steps_per_file               =  1
   mode                         =  1            ! 1: forecast mode (relative t-axis)
-               ! 2: climate mode (absolute t-axis)
-  include_last                 = .TRUE.
-  steps_per_file_inclfirst     = .FALSE.
-  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
-  filename_format              = '<output_filename>_<datetime2>'
-      operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
- ! ml_varlist                   = 'group:mode_iniana' ! this causes problems with operation="mean" in other output streams
-      ml_varlist                   = 'alb_si','c_t_lk','fr_land','fr_seaice','freshsnow','gz0','h_ice','h_ml_lk','h_snow','pres','qc','qi','qr','qs','qv',
-                                      'qv_s','rho_snow','smi','t_bot_lk','t_g','t_ice','t_mnw_lk','t_snow','t_so','t_wml_lk','temp','tke','u','v','w','w_i',
-                                      'w_snow','w_so_ice','z_ifc','plantevap','hsnow_max','snow_age'                         !'group:mode_iniana'
-  output_grid                  =  .TRUE.
-! stream_partitions_ml         =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 2
- filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
- dom                          =  1            ! write all domains
- output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
- steps_per_file               =  1
- mode                         =  1            ! 1: forecast mode (relative t-axis)
-      ! 2: climate mode (absolute t-axis)
- include_last                 = .TRUE.
- steps_per_file_inclfirst     = .FALSE.
- output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
- filename_format              = '<output_filename>_<datetime2>'
-     operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
- ml_varlist                   = 'w_i','t_so','w_so','w_so_ice','freshsnow','rho_snow','w_snow','t_s','t_g','w'
- output_grid                  =  .TRUE.
-! stream_partitions_ml         =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 3
-  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
-  dom                          =  1            ! write all domains
-  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
-  steps_per_file               =  1
-  mode                         =  1            ! 1: forecast mode (relative t-axis)
-       ! 2: climate mode (absolute t-axis)
-  include_last                 = .TRUE.
-  steps_per_file_inclfirst     = .FALSE.
-  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
-  filename_format              = '<output_filename>_<datetime2>'
-      operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
-  ml_varlist                   = 'clct','clct_mod','pres_msl','pres_sfc','qv_2m','rh_2m',
-                                     'runoff_g','runoff_s','rain_con','snow_con','rain_gsp','snow_gsp','tot_prec',
-                                     't_2m','td_2m','u_10m','v_10m','gust10','sp_10m','snow_melt'
-  output_grid                  =  .TRUE.
-! stream_partitions_ml       =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 4
-  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
-  dom                          =  1            ! write all domains
-  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
-  steps_per_file               =  1
-  mode                         =  1            ! 1: forecast mode (relative t-axis)
-       ! 2: climate mode (absolute t-axis)
-  include_last                 = .TRUE.
-  steps_per_file_inclfirst     = .FALSE.
-  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
-  filename_format              = '<output_filename>_<datetime2>'
-      operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
-  ml_varlist                   = 'tmax_2m','tmin_2m', 'dursun', 'lai', 'plcov', 'rootdp',
-  output_grid                  =  .TRUE.
-! stream_partitions_ml       =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 5
-  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
-  dom                          =  1            ! write all domains
-  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
-  steps_per_file               =  1
-  mode                         =  1            ! 1: forecast mode (relative t-axis)
-       ! 2: climate mode (absolute t-axis)
-  include_last                 = .TRUE.
-  steps_per_file_inclfirst     = .FALSE.
-  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
-  filename_format              = '<output_filename>_<datetime2>'
-      operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
-  ml_varlist                   = 'tqc','tqi','tqv','tqr','tqs','cape_ml','cape','h_snow'
-  output_grid                  =  .TRUE.
-! stream_partitions_ml       =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 6
- filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
- dom                          =  1            ! write all domains
- output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.   ! start, end, increment
- steps_per_file               =  1
- mode                         =  1            ! 1: forecast mode (relative t-axis)
-                                              ! 2: climate mode (absolute t-axis)
- include_last                 = .TRUE.
- steps_per_file_inclfirst     = .FALSE.
- output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
- filename_format              = '<output_filename>_<datetime2>p'
-     operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
- pl_varlist                   = 'geopot','qv','rh','temp','u','v','omega'
- p_levels                     =  20000, 30000, 50000, 70000, 85000, 92500, 95000
- output_grid                  =  .TRUE.
-! stream_partitions_ml         =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 7
- filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
- dom                          =  1            ! write all domains
- output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
- steps_per_file               =  1
- mode                         =  1            ! 1: forecast mode (relative t-axis)
-      ! 2: climate mode (absolute t-axis)
- include_last                 = .TRUE.
- steps_per_file_inclfirst     = .FALSE.
- output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
- filename_format              = '<output_filename>_<datetime2>z'
-     operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
- hl_varlist                   = 'pres','qv','rh','temp','u','v'
- h_levels                     = 10.0, 34.5, 69.0, 116.0, 178.5, 258.5, 357.5, 477.0
- output_grid                  =  .TRUE.
-! stream_partitions_ml       =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 8
-  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
-  dom                          =  1            ! write all domains
-  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
-  steps_per_file               =  1
-  mode                         =  1            ! 1: forecast mode (relative t-axis)
-       ! 2: climate mode (absolute t-axis)
-  include_last                 = .TRUE.
-  steps_per_file_inclfirst     = .FALSE.
-  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
-  filename_format              = '<output_filename>_<datetime2>'
-      operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
-  ml_varlist                   = 'qhfl_s','lhfl_s','shfl_s','thu_s','sob_s',
-                                     'sob_t','sod_t','sodifd_s','thb_s','sou_s','thb_t','umfl_s','vmfl_s'
-  output_grid                  =  .TRUE.
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 9
-  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
-  dom                          =  1            ! write all domains
-  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
-  steps_per_file               =  1
-  mode                         =  1            ! 1: forecast mode (relative t-axis)
-       ! 2: climate mode (absolute t-axis)
-  include_last                 = .TRUE.
-  steps_per_file_inclfirst     = .FALSE.
-  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
-  filename_format              = '<output_filename>_<datetime2>'
-      operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
-  ml_varlist                   = 'sodifd_s','sob_s','sou_s','thb_s'
-  output_grid                  =  .TRUE.
-! stream_partitions_ml       =  2
-/
-&output_nml
-!-----------------------------------------------------------Output Namelist 10
-  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
-  dom                          =  1            ! write all domains
-  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
-  steps_per_file               =  1
-  mode                         =  1            ! 1: forecast mode (relative t-axis)
-      ! 2: climate mode (absolute t-axis)
   include_last                 = .TRUE.
   steps_per_file_inclfirst     = .FALSE.
   output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
   filename_format              = '<output_filename>_<datetime2>'
   operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
-  ml_varlist                   = 'pres','qv','rh','temp','u','v',
-  output_grid                  =  .TRUE.
-!  stream_partitions_ml        =  2
+  ml_varlist                   = 'alb_si',
+                                 'c_t_lk',
+                                 'fr_seaice',
+                                 'freshsnow',
+                                 'gz0',
+                                 'h_ice',
+                                 'h_ml_lk',
+                                 'h_snow',
+                                 'hsnow_max',
+                                 'plantevap',
+                                 'pres',
+                                 'qc',
+                                 'qi',
+                                 'qr',
+                                 'qs',
+                                 'qv',
+                                 'qv_s',
+                                 'rho_snow',
+                                 'smi',
+                                 'snow_age',
+                                 't_bot_lk',
+                                 't_g',
+                                 't_ice',
+                                 't_mnw_lk',
+                                 't_snow',
+                                 't_so',
+                                 't_wml_lk',
+                                 'temp',
+                                 'tke',
+                                 'u',
+                                 'v',
+                                 'w',
+                                 'w_i',
+                                 'w_snow',
+                                 'w_so_ice'
+  output_grid                  = .TRUE.
 /
 &output_nml
-!-----------------------------------------------------------Output Namelist 11
+!--------------------------------Output Namelist 2: 1hr + mean
+ filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+ dom                          =  1            ! write all domains
+ output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
+ steps_per_file               =  1
+ mode                         =  1            ! 1: forecast mode (relative t-axis)
+ include_last                 = .TRUE.
+ steps_per_file_inclfirst     = .FALSE.
+ output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+ filename_format              = '<output_filename>_<datetime2>'
+ operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+ ml_varlist                   = 'clct',
+                                'clct_mod',
+                                'lhfl_s',
+                                'qhfl_s',
+                                'shfl_s',
+                                'sob_s',
+                                'sob_t',
+                                'sod_t',
+                                'sodifd_s',
+                                'sou_s',
+                                'thb_s',
+                                'thb_t',
+                                'thu_s'
+ output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 3: 6hrs + mean
+  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1            ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1            ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'clch',
+                                 'clcm',
+                                 'clcl',
+                                 'tkvh',
+                                 'tch',
+                                 'umfl_s',
+                                 'vmfl_s'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 4: 1hr 
+  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1            ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1            ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'pres_msl',
+                                 'pres_sfc',
+                                 'qv_2m',
+                                 'rain_con',
+                                 'rain_gsp',
+                                 'rh_2m',
+                                 'snow_con',
+                                 'snow_gsp',
+                                 'sp_10m',
+                                 't_2m',
+                                 't_g',
+                                 'tot_prec',
+                                 'u_10m',
+                                 'v_10m'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 5: 1hr+10min
+  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1            ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1            ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'sodifd_s',
+                                 'sob_s',
+                                 'sou_s'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!--------------------------------Output Namelist 6: 3hrs
+  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1            ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.   ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1            ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>p'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'dursun',
+                                 'gust10'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 7: 6hrs
+  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1            ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1            ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'fr_seaice',
+                                 'h_snow',
+                                 'resid_wso',
+                                 'runoff_g',
+                                 'runoff_s',
+                                 'snow_melt',
+                                 'snowfrac',
+                                 'tqc',
+                                 'tqr'
+                                 'tqs'
+                                 'tqi',
+                                 'tqv',
+                                 'w_so',
+                                 'w_so_ice',
+                                 'w_snow'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 8: 24hrs
+  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1            ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1            ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'tmax_2m',
+                                 'tmin_2m'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 9: 24hrs + max
+  filetype                     =  4            ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1            ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1            ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'cape_ml',
+                                 'cin_ml',
+                                 'gz0',
+                                 'lai',
+                                 'plcov',
+                                 'rootdp',
+                                 'sp_10m'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 10: 1hr + mlevel
   filetype                     =  4              ! output format: 2=GRIB2, 4=NETCDFv2
   dom                          =  1              ! write all domains
-  output_bounds                =  0., 0., 3600.  ! start, end, increment
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}.    ! start, end, increment
   steps_per_file               =  1
   mode                         =  1              ! 1: forecast mode (relative t-axis)
        ! 2: climate mode (absolute t-axis)
   include_last                 = .FALSE.
   steps_per_file_inclfirst     = .FALSE.
-  output_filename              = '${OUTDIR}/icon'
-  filename_format              = '<output_filename>_<datetime2>c'   ! file name base
-  ml_varlist                   = 'z_ifc','z_mc','topography_c','fr_land','depth_lk', 'fr_lake', 'soiltyp',
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'   ! file name base
+  ml_varlist                   = 'u',
+                                 'v'
+  m_levels                     = '53...59'
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 11: 1hrs + plevel - NUKLEUS
+  filetype                     =  4                                                  ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1                                                  ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}. ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1                                                  ! 1: forecast mode (relative t-axis)
+                                                                                      ! 2: climate mode (absolute t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>p'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  pl_varlist                   = 'geopot',
+                                 'qv',
+                                 'rh',
+                                 'temp',
+                                 'u',
+                                 'v',
+                                 'w'
+  p_levels                     =  30000,50000,70000,95000
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 12: 6hrs + plevel - CORDEX
+  filetype                     =  4                                                  ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1                                                  ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}. ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1                                                  ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>p'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  pl_varlist                   = 'geopot',
+                                 'qv',
+                                 'temp',
+                                 'u',
+                                 'v',
+                                 'w'
+  p_levels                     =  20000,25000,40000,60000,85000,92500,100000
+  output_grid                  = .TRUE.
+/
+&output_nml
+!---------------------------------Output Namelist 13: 3hrs
+  filetype                     =  4                                                  ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1                                                  ! write all domains
+  output_bounds                =  ${SSTART}, ${SNEXT}, ${SOUT_INC[$((NOUTDIR+=1))]}. ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1                                                  ! 1: forecast mode (relative t-axis)
+  include_last                 = .TRUE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/${YYYY_MM}/out$(printf %02d $NOUTDIR)/icon'
+  filename_format              = '<output_filename>_<datetime2>'
+  operation                    = "${OPERATION[$((${NOUTDIR}-1))]}"
+  ml_varlist                   = 'alb_si',
+                                 'freshsnow',
+                                 'fr_seaice',
+                                 'h_ice',
+                                 'h_snow',
+                                 'hsnow_max',
+                                 'plantevap',
+                                 'rho_snow',
+                                 'snow_age',
+                                 't_g',
+                                 't_ice',
+                                 't_sk',
+                                 't_snow',
+                                 't_so',
+                                 'qv_s',
+                                 'w_i',
+                                 'w_snow',
+                                 'w_so'
   output_grid                  =  .TRUE.
-!  stream_partitions_ml 	      =  2
+/
+&output_nml
+!---------------------------------Output Namelist 14: c-file
+  filetype                     =  4                                                  ! output format: 2=GRIB2, 4=NETCDFv2
+  dom                          =  1                                                  ! write all domains
+  output_bounds                =  0., 0., 3600.                                      ! start, end, increment
+  steps_per_file               =  1
+  mode                         =  1                                                  ! 1: forecast mode (relative t-axis)
+  include_last                 = .FALSE.
+  steps_per_file_inclfirst     = .FALSE.
+  output_filename              = '${OUTDIR}/icon'
+  filename_format              = '<output_filename>_<datetime2>c'                    ! file name base
+  ml_varlist                   = 'depth_lk',
+                                 'fr_land',
+                                 'fr_lake',
+                                 'soiltyp',
+                                 'topography_c',
+                                 'z_ifc',
+                                 'z_mc'
+  output_grid                  =  .TRUE.
 /
 &meteogram_output_nml
   lmeteogram_enabled = .TRUE.
