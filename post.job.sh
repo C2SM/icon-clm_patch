@@ -173,74 +173,67 @@ echo time series part 1  --- build time series for selected variables
 # --- build time series for selected variables
 
 ts_command_list=(
-'timeseries RAIN_CON  out03 remapnn' #accumulated convective surface rain [kg/m2]
-'timeseries SNOW_CON  out03 remapnn' #accumulated convective surface snow [kg/m2]
-'timeseries RAIN_GSP  out03 remapnn' #accumulated grid scale surface rain [kg/m2]
-'timeseries SNOW_GSP  out03 remapnn' #accumulated grid scale surface snow [kg/m2]
-'timeseries TOT_PREC  out03 remapnn' #total precicitation [kg/m2]
-#
-'timeseries AEVAP_S   out08 remapnn'
-'timeseries ALHFL_S   out08 remapnn' #latent heat flux (surface) [W/m2]
-'timeseries ASHFL_S   out08 remapnn' #sensible heat flux (surface) [W/m2]
-#'timeseries ATHD_S    out08 remapnn'
-'timeseries ATHU_S    out08 remapnn' #
-'timeseries ASOB_S    out08 remapnn' #
-'timeseries ASOB_T    out08 remapnn'
-'timeseries ASOD_T    out08 remapnn'
-'timeseries ASODIFD_S out08 remapnn'
-'timeseries ASODIFU_S out08 remapnn'
-'timeseries ATHB_S    out08 remapnn'
-'timeseries ATHB_T    out08 remapnn'
-#'timeseries ASODIRD_S  out08 remapnn'
-#'timeseries ALB_RAD   out08 remapnn'
-'timeseries AUMFL_S   out08 remapnn' #u-momentum flux at the surface [N/m2]
-'timeseries AVMFL_S   out08 remapnn' #v-momentum flux at the surface [N/m2]
-#
-'timeseries CLCT      out03 remapnn'
-'timeseries CLCT_MOD  out03 remapnn' #	modified total cloud cover
-'timeseries SPGUST_10M  out03 remapnn'
-'timeseries SP_10M    out03 remapnn' # 10m wind speed
-#timeseries HPBL      out03 remapnn  #boundary layer height above sea level [m]
-'timeseries PMSL      out03 remapnn' #mean sea level pressure [Pa]
-'timeseries PS        out03 remapnn' #surface pressure [Pa]
-'timeseries QV_2M     out03 remapnn' #specific water vapor content in 2m [kg/kg]
-'timeseries T_2M      out03 remapnn'
-'timeseries TD_2M     out03 remapnn'
-'timeseries U_10M     out03 remapnn'
-'timeseries V_10M     out03 remapnn'
-'timeseries RELHUM_2M out03 remapnn'
-'timeseries RUNOFF_S  out03 remapnn' #surface water runoff; sum over forecast [kg/m2]
-'timeseries RUNOFF_G  out03 remapnn' #ground water runoff; sum over forecast [kg/m2]
-'timeseries SNOW_MELT out03 remapnn' #snow melt [kg/m2]
-#
-'timeseries CAPE_ML   out05 remapnn'
-'timeseries CAPE_CON  out05 remapnn'
-'timeseries H_SNOW    out05 remapnn'
-'timeseries TQC       out05 remapnn'
-'timeseries TQI       out05 remapnn'
-'timeseries TQR       out05 remapnn'
-'timeseries TQS       out05 remapnn'
-'timeseries TQV       out05 remapnn' #column integrated water vapour [kg m-2]
-#
-'timeseries W_I       out02 remapnn'
-'timeseries T_SO      out02 remapnn'
-'timeseries W_SO      out02 remapnn'
-'timeseries W_SO_ICE  out02 remapnn'
-'timeseries T_S       out02 remapnn'
-'timeseries T_G       out02 remapnn'
-'timeseries W_SNOW    out02 remapnn' #water content of snow [m H2O]
+'timeseries ASOB_S    out02 remapnn' #sob_s
+'timeseries ASODIFU_S out02 remapnn' #sou_s
+'timeseries ATHB_S    out02 remapnn' #thb_s
+'timeseries ATHU_S    out02 remapnn' #thu_s
+'timeseries ASODIFD_S out02 remapnn' #sodifd_s
+'timeseries ALHFL_S   out02 remapnn' #lhfl_s
+'timeseries ASHFL_S   out02 remapnn' #shfl_s
+'timeseries ACLCT_MOD out02 remapnn' #clct_mod
+'timeseries ACLCT     out02 remapnn' #clct
+'timeseries ATHB_T    out02 remapnn' #thb_t
+'timeseries ASOB_T    out02 remapnn' #sob_t
+'timeseries ASOD_T    out02 remapnn' #sod_t
+'timeseries AEVAP_S   out02 remapnn' #qhfl_s
 
-'timeseries TMAX_2M   out04 remapnn'
-'timeseries TMIN_2M   out04 remapnn'
-'timeseries DURSUN    out04 remapnn' # sunshine duration [s]
-'timeseries LAI       out04 remapnn'
-'timeseries PLCOV     out04 remapnn'
-'timeseries ROOTDP    out04 remapnn'
+'timeseries AUMFL_S   out03 remapnn' #umfl_s
+'timeseries AVMFL_S   out03 remapnn' #vmfl_s
+'timeseries ACLCH     out03 remapnn' #clch
+'timeseries ACLCM     out03 remapnn' #clcm
+'timeseries ACLCL     out03 remapnn' #clcl
 
-'timeseries SODIFD_S  out09 remapnn'
-'timeseries SOBS_RAD  out09 remapnn'
-'timeseries SODIFU_S  out09 remapnn'
-'timeseries THBS_RAD  out09 remapnn'
+'timeseries T_2M      out04 remapnn' #t_2m
+'timeseries T_G       out04 remapnn' #t_g
+'timeseries TOT_PREC  out04 remapnn' #tot_prec
+'timeseries RAIN_CON  out04 remapnn' #rain_con
+'timeseries RAIN_GSP  out04 remapnn' #rain_gsp
+'timeseries SNOW_CON  out04 remapnn' #snow_con
+'timeseries SNOW_GSP  out04 remapnn' #snow_gsp
+'timeseries RELHUM_2M out04 remapnn' #rh_2m
+'timeseries QV_2M     out04 remapnn' #qv_2m
+'timeseries PMSL      out04 remapnn' #pres_msl
+#'timeseries VABS_10M  out04 remapnn' #sp_10m
+'timeseries U_10M     out04 remapnn' #u_10m
+'timeseries V_10M     out04 remapnn' #v_10m
+'timeseries PS        out04 remapnn' #pres_sfc
+
+'timeseries SOBS_RAD  out05 remapnn' #sob_s
+'timeseries SODIFU_S  out05 remapnn' #sou_s
+'timeseries SODIFD_S  out05 remapnn' #sodifd_s
+
+'timeseries DURSUN    out06 remapnn' #dursun
+'timeseries VMAX_10M  out06 remapnn' #gust10
+
+'timeseries RUNOFF_S  out07 remapnn' #runoff_s
+'timeseries RUNOFF_G  out07 remapnn' #runoff_g
+'timeseries RESID_WSO out07 remapnn' #resid_wso
+'timeseries TQC       out07 remapnn' #tqv
+'timeseries TQI       out07 remapnn' #tqi
+'timeseries TQV       out07 remapnn' #tqv
+'timeseries W_SO      out07 remapnn' #w_so
+'timeseries W_SO_ICE  out07 remapnn' #w_so_ice
+'timeseries W_SNOW    out07 remapnn' #w_snow
+'timeseries H_SNOW    out07 remapnn' #h_snow
+'timeseries FR_SNOW   out07 remapnn' #snowfrac
+'timeseries SNOW_MELT out07 remapnn' #meltrate
+'timeseries FR_ICE    out07 remapnn' #fr_seaice
+
+'timeseries TMAX_2M   out08 remapnn' #tmax_2m
+'timeseries TMIN_2M   out08 remapnn' #tmin_2m
+
+'timeseries U         out10 remapnn' #u
+'timeseries V         out10 remapnn' #v
 )
 
 NUMFILES=${#ts_command_list[@]}
@@ -259,30 +252,33 @@ do
 done
 wait
 
+#timeseries VABS_10M out09 remapnn   #sp_10m
+timeseries LAI out09 remapnn        #lai
+timeseries PLCOV out09 remapnn      #plcov
+timeseries ROOTDP out09 remapnn     #rootdp
+timeseries CAPE_ML out09 remapnn    #cape_ml
+timeseries CIN_ML out09 remapnn     #cin_ml
+timeseries Z0 out09 remapnn         #gz0
+
 #... time series part 2
 echo time series part 2 --- building a time series for a given quantity on pressure- and z-levels
 #... building a time series for a given quantity on pressure- and z-levels
 
 ts_command_list=(
-'timeseriesp OMEGA    out06 PLEVS[@] remapnn'
-'timeseriesp T        out06 PLEVS[@] remapnn'
-'timeseriesp U        out06 PLEVS[@] remapnn'
-'timeseriesp V        out06 PLEVS[@] remapnn'
-'timeseriesp FI       out06 PLEVS[@] remapnn'
-'timeseriesp QV       out06 PLEVS[@] remapnn'
-'timeseriesp RELHUM   out06 PLEVS[@] remapnn'
-'timeseriesz T        out07 ZLEVS[@] remapnn'
-'timeseriesz U        out07 ZLEVS[@] remapnn'
-'timeseriesz V        out07 ZLEVS[@] remapnn'
-'timeseriesz RELHUM   out07 ZLEVS[@] remapnn'
-'timeseriesz QV       out07 ZLEVS[@] remapnn'
-'timeseriesz P        out07 ZLEVS[@] remapnn'
-'timeseriesz T        out10 HLEVS[@] remapnn'
-'timeseriesz U        out10 HLEVS[@] remapnn'
-'timeseriesz V        out10 HLEVS[@] remapnn'
-'timeseriesz RELHUM   out10 HLEVS[@] remapnn'
-'timeseriesz QV       out10 HLEVS[@] remapnn'
-'timeseriesz P        out10 HLEVS[@] remapnn'
+'timeseriesp T        out11 PLEVS_NUK[@] remapnn'
+'timeseriesp U        out11 PLEVS_NUK[@] remapnn'
+'timeseriesp V        out11 PLEVS_NUK[@] remapnn'
+'timeseriesp W        out11 PLEVS_NUK[@] remapnn'
+'timeseriesp FI       out11 PLEVS_NUK[@] remapnn'
+'timeseriesp RELHUM   out11 PLEVS_NUK[@] remapnn'
+'timeseriesp QV       out11 PLEVS_NUK[@] remapnn'
+ 
+'timeseriesp T        out12 PLEVS_COR[@] remapnn'
+'timeseriesp U        out12 PLEVS_COR[@] remapnn'
+'timeseriesp V        out12 PLEVS_COR[@] remapnn'
+'timeseriesp W        out12 PLEVS_COR[@] remapnn'
+'timeseriesp FI       out12 PLEVS_COR[@] remapnn'
+'timeseriesp QV       out12 PLEVS_COR[@] remapnn'
 )
 
 #... counting number of files to be created
@@ -318,12 +314,12 @@ echo time series part 3 --- building additional time series for a given quantiti
 #... building additional time series for a given quantities on pressure- and z-levels
 #...   these quantities are based on the time series in part 2
 ts_command_list=(
-'timeseriesap SP            PLEVS[@] '
-'timeseriesap DD            PLEVS[@] '
-'timeseriesaz SP            ZLEVS[@]  NN '
-'timeseriesaz DD            ZLEVS[@]  NN '
-'timeseriesaz SP            HLEVS[@] '
-'timeseriesaz DD            HLEVS[@] '
+#'timeseriesap SP            PLEVS[@] '
+#'timeseriesap DD            PLEVS[@] '
+#'timeseriesaz SP            ZLEVS[@]  NN '
+#'timeseriesaz DD            ZLEVS[@]  NN '
+#'timeseriesaz SP            HLEVS[@] '
+#'timeseriesaz DD            HLEVS[@] '
 )
 
 #... counting number of files to be created
@@ -362,7 +358,6 @@ echo time series part 4 --- building additional quantities calculated from the q
 #...    variables depend on other additional variables (e.g. ASOD_S depends on ASODIRD_S)
 
 ts_command_list=(
-'timeseries RUNOFF_S_corr'    # runoff_s correction for lake shores; arguments are outputintervals of RUNOFF_S, TOT_PREC, and AEVAP_S
 'timeseries ASODIRD_S'
 'timeseries ASOD_S'
 'timeseries ASOU_T'
@@ -372,6 +367,7 @@ ts_command_list=(
 'timeseries FR_SNOW'
 'timeseries PVAP_2M'
 'timeseries PREC_CON'
+'timeseries RUNOFF_T'
 'timeseries TOT_SNOW'
 'timeseries TQW'
 )
@@ -391,32 +387,7 @@ do
   fi
 done
 wait
-#... time series part 5
-echo time series part 5 --- building additional quantities calculated from the quantities in part 1
-#... !!! any additional quantities calculated from the quantities in part 4
-#... should be included here !!!
-#... one has to split the list in two parts, if in case of parallel computation
-#...    variables depend on other additional variables (e.g. ASOD_S depends on ASODIRD_S)
-
-ts_command_list=(
-'timeseries RUNOFF_T'    # runoff_s + runoff_g
-)
-
-NUMFILES=$((${NUMFILES} + ${#ts_command_list[@]}))
-export COUNTPP=0
-for ts_command in "${ts_command_list[@]}"
-do
-  ${ts_command} &
-  (( COUNTPP=COUNTPP+1 ))
-  if [[ ${COUNTPP} -ge ${MAXPP} ]]
-  then
-    COUNTPP=0
-    wait
-  fi
-done
-wait
-set -u
-
+ 
 ###############################################
 # remove the icon output for YYYY_MM from the SCRATCH directory
 # Safety check whether *tmp files exist. In that case something
