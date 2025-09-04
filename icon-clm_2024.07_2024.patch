@@ -1,7 +1,7 @@
-From b6b887a4c672aaf3855cc2dd386078c5433dfbef Mon Sep 17 00:00:00 2001
+From 1ac91e3760a0b8c96051f3bbbd2452316d93b64e Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Michael=20J=C3=A4hn?= <mjaehn@ethz.ch>
-Date: Thu, 4 Sep 2025 11:47:11 +0200
-Subject: [PATCH] GPU patch for ICON-CLM (2024 + lscale_cdnc)
+Date: Tue, 3 Dec 2024 10:39:39 +0100
+Subject: [PATCH] GPU patch for ICON-CLM
 
 ---
  config/dkrz/levante.cpu.nvhpc-22.5            |   2 +-
@@ -23,7 +23,7 @@ Subject: [PATCH] GPU patch for ICON-CLM (2024 + lscale_cdnc)
  src/atm_phy_bcs/mo_bc_aeropt_kinne.f90        | 376 ++++----
  src/atm_phy_bcs/mo_bc_aeropt_splumes.f90      | 561 +++++++-----
  src/atm_phy_nwp/mo_ecrad.f90                  |   4 +
- src/atm_phy_nwp/mo_nwp_aerosol.f90            | 200 +++--
+ src/atm_phy_nwp/mo_nwp_aerosol.f90            | 201 +++--
  src/atm_phy_nwp/mo_nwp_diagnosis.f90          |  18 +-
  src/atm_phy_nwp/mo_nwp_ecrad_init.f90         | 153 ++--
  src/atm_phy_nwp/mo_nwp_ecrad_interface.f90    | 230 ++---
@@ -41,14 +41,14 @@ Subject: [PATCH] GPU patch for ICON-CLM (2024 + lscale_cdnc)
  src/configure_model/mo_nml_crosscheck.f90     |   3 -
  src/shared/mo_idx_list.f90                    |  10 +-
  src/shared/mo_latitude_interpolation.f90      |  35 +-
- 37 files changed, 2188 insertions(+), 1529 deletions(-)
+ 37 files changed, 2191 insertions(+), 1527 deletions(-)
  create mode 100644 run/tolerance/pp.collect_selected_members
  create mode 100644 scripts/experiments/c2sm/clm_experiments.yml
  create mode 100644 scripts/experiments/c2sm/clm_tests.yml
  create mode 100644 scripts/experiments/c2sm/mch_tests.yml
 
 diff --git a/config/dkrz/levante.cpu.nvhpc-22.5 b/config/dkrz/levante.cpu.nvhpc-22.5
-index 78740309a..82742c2f0 100755
+index 78740309a9..82742c2f0e 100755
 --- a/config/dkrz/levante.cpu.nvhpc-22.5
 +++ b/config/dkrz/levante.cpu.nvhpc-22.5
 @@ -61,7 +61,7 @@ MPI_LAUNCH="${MPI_ROOT}/bin/mpiexec"
@@ -61,7 +61,7 @@ index 78740309a..82742c2f0 100755
  # NVHPC 23.3 and older are even worse in detecting whether an array is
  # contiguous. Therefore, we have to disable the run-time checks too:
 diff --git a/config/dkrz/levante.gpu.nvhpc-22.5 b/config/dkrz/levante.gpu.nvhpc-22.5
-index c286d6a4e..aca6b11b9 100755
+index c286d6a4ef..aca6b11b94 100755
 --- a/config/dkrz/levante.gpu.nvhpc-22.5
 +++ b/config/dkrz/levante.gpu.nvhpc-22.5
 @@ -66,7 +66,7 @@ LIBS="-Wl,--as-needed ${XML2_LIBS} ${FYAML_LIBS} ${ECCODES_LIBS} ${BLAS_LAPACK_L
@@ -74,7 +74,7 @@ index c286d6a4e..aca6b11b9 100755
  # The compiler fails one of the YAC configure-time tests, which we suppress and
  # hope for the best:
 diff --git a/run/checksuite.clm/clmexp.ICON_CLM b/run/checksuite.clm/clmexp.ICON_CLM
-index 44331342d..8cd311418 100644
+index 44331342de..8cd3114188 100644
 --- a/run/checksuite.clm/clmexp.ICON_CLM
 +++ b/run/checksuite.clm/clmexp.ICON_CLM
 @@ -24,7 +24,7 @@
@@ -945,7 +945,7 @@ index 44331342d..8cd311418 100644
  
  # ----------------------------------------------------------------------------
 diff --git a/run/checksuite.icon-dev/check.c2sm_clm_r13b03_seaice b/run/checksuite.icon-dev/check.c2sm_clm_r13b03_seaice
-index 985a255a5..bd1ee1d26 100644
+index 985a255a50..bd1ee1d265 100644
 --- a/run/checksuite.icon-dev/check.c2sm_clm_r13b03_seaice
 +++ b/run/checksuite.icon-dev/check.c2sm_clm_r13b03_seaice
 @@ -12,12 +12,12 @@
@@ -1018,7 +1018,7 @@ index 985a255a5..bd1ee1d26 100644
  exit
  
 diff --git a/run/checksuite.icon-dev/icon-dev.checksuite b/run/checksuite.icon-dev/icon-dev.checksuite
-index 3c73ac992..4d8647ba7 100755
+index 3c73ac9924..4d8647ba76 100755
 --- a/run/checksuite.icon-dev/icon-dev.checksuite
 +++ b/run/checksuite.icon-dev/icon-dev.checksuite
 @@ -893,16 +893,33 @@ if [[ ${MD} =~ .*n.* ]]; then
@@ -1063,7 +1063,7 @@ index 3c73ac992..4d8647ba7 100755
      else
          echo "Found $TEST run"
 diff --git a/run/create_target_header b/run/create_target_header
-index 4a5fc8e92..b0267abb7 100644
+index 4a5fc8e92d..b0267abb71 100644
 --- a/run/create_target_header
 +++ b/run/create_target_header
 @@ -440,6 +440,8 @@ set_run_target_bullx_gpu()
@@ -1090,7 +1090,7 @@ index 4a5fc8e92..b0267abb7 100644
  
      # set more default values
 diff --git a/run/exp.c2sm_clm_r13b03_seaice b/run/exp.c2sm_clm_r13b03_seaice
-index d598d6811..595e160f2 100644
+index d598d68118..595e160f26 100644
 --- a/run/exp.c2sm_clm_r13b03_seaice
 +++ b/run/exp.c2sm_clm_r13b03_seaice
 @@ -76,7 +76,7 @@ atmo_namelist=NAMELIST_${EXPNAME}_atm
@@ -1182,7 +1182,7 @@ index d598d6811..595e160f2 100644
    direct_albedo = 4
    albedo_whitecap = 1
 diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia b/run/tolerance/hashes/balfrin_cpu_nvidia
-index cbaf5c8cc..d46e5cc71 100644
+index cbaf5c8cc5..d46e5cc71f 100644
 --- a/run/tolerance/hashes/balfrin_cpu_nvidia
 +++ b/run/tolerance/hashes/balfrin_cpu_nvidia
 @@ -4,21 +4,20 @@
@@ -1225,7 +1225,7 @@ index cbaf5c8cc..d46e5cc71 100644
 +"mch_opr_r19b07_turb": 3a34fa17db63e74c3b3bbba1a849daea8a72ee58
 +"mch_pollen_test": fa0db7ad6c5ed86993f40303896ba89bb770f698
 diff --git a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
-index aae0a1017..caa6077eb 100644
+index aae0a1017f..caa6077eb2 100644
 --- a/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
 +++ b/run/tolerance/hashes/balfrin_cpu_nvidia_mixed
 @@ -4,17 +4,17 @@
@@ -1262,7 +1262,7 @@ index aae0a1017..caa6077eb 100644
 +"mch_pollen_test": 3c959a9199669b43abb1366a1f15e8b768f7a8f0
 diff --git a/run/tolerance/pp.collect_selected_members b/run/tolerance/pp.collect_selected_members
 new file mode 100644
-index 000000000..96986c2f5
+index 0000000000..96986c2f5f
 --- /dev/null
 +++ b/run/tolerance/pp.collect_selected_members
 @@ -0,0 +1,61 @@
@@ -1328,7 +1328,7 @@ index 000000000..96986c2f5
 +# exit 0 on success (and don't execute any appended scripts)
 +exit 0
 diff --git a/scripts/buildbot_scripts/create_list_merge2rc b/scripts/buildbot_scripts/create_list_merge2rc
-index 3c0f8a8a1..0af3e100d 100755
+index 3c0f8a8a1e..0af3e100dc 100755
 --- a/scripts/buildbot_scripts/create_list_merge2rc
 +++ b/scripts/buildbot_scripts/create_list_merge2rc
 @@ -312,7 +312,8 @@ $addexp  checksuite.infrastructure/checkExternals/exp.check_externals_LEVANTE.ru
@@ -1343,7 +1343,7 @@ index 3c0f8a8a1..0af3e100d 100755
  
 diff --git a/scripts/experiments/c2sm/clm_experiments.yml b/scripts/experiments/c2sm/clm_experiments.yml
 new file mode 100644
-index 000000000..7486b49a8
+index 0000000000..7486b49a81
 --- /dev/null
 +++ b/scripts/experiments/c2sm/clm_experiments.yml
 @@ -0,0 +1,22 @@
@@ -1371,7 +1371,7 @@ index 000000000..7486b49a8
 +        - NetCDF: ['*atm_3d*.nc']
 diff --git a/scripts/experiments/c2sm/clm_tests.yml b/scripts/experiments/c2sm/clm_tests.yml
 new file mode 100644
-index 000000000..b68b70cb9
+index 0000000000..b68b70cb9a
 --- /dev/null
 +++ b/scripts/experiments/c2sm/clm_tests.yml
 @@ -0,0 +1,23 @@
@@ -1400,7 +1400,7 @@ index 000000000..b68b70cb9
 +      - balfrin: 10
 diff --git a/scripts/experiments/c2sm/mch_tests.yml b/scripts/experiments/c2sm/mch_tests.yml
 new file mode 100644
-index 000000000..aec987831
+index 0000000000..aec987831c
 --- /dev/null
 +++ b/scripts/experiments/c2sm/mch_tests.yml
 @@ -0,0 +1,221 @@
@@ -1626,7 +1626,7 @@ index 000000000..aec987831
 +    ensemble_num:
 +      - balfrin_cpu_nvidia: [26,28,48,29,46]
 diff --git a/src/atm_dyn_iconam/mo_nh_stepping.f90 b/src/atm_dyn_iconam/mo_nh_stepping.f90
-index cff2fe650..0fa950bc7 100644
+index cff2fe650c..0fa950bc75 100644
 --- a/src/atm_dyn_iconam/mo_nh_stepping.f90
 +++ b/src/atm_dyn_iconam/mo_nh_stepping.f90
 @@ -1192,7 +1192,7 @@ MODULE mo_nh_stepping
@@ -1639,7 +1639,7 @@ index cff2fe650..0fa950bc7 100644
            ELSE
              ! rebuild index lists for water and seaice based on fr_seaice, 
 diff --git a/src/atm_phy_bcs/mo_bc_aeropt_cmip6_volc.f90 b/src/atm_phy_bcs/mo_bc_aeropt_cmip6_volc.f90
-index c4b8ad6ad..5d179ef21 100644
+index c4b8ad6ad4..5d179ef21a 100644
 --- a/src/atm_phy_bcs/mo_bc_aeropt_cmip6_volc.f90
 +++ b/src/atm_phy_bcs/mo_bc_aeropt_cmip6_volc.f90
 @@ -25,6 +25,7 @@ MODULE mo_bc_aeropt_cmip6_volc
@@ -2099,7 +2099,7 @@ index c4b8ad6ad..5d179ef21 100644
  
    !>
 diff --git a/src/atm_phy_bcs/mo_bc_aeropt_kinne.f90 b/src/atm_phy_bcs/mo_bc_aeropt_kinne.f90
-index 0e6ad102a..47f736596 100644
+index 0e6ad102ab..47f7365963 100644
 --- a/src/atm_phy_bcs/mo_bc_aeropt_kinne.f90
 +++ b/src/atm_phy_bcs/mo_bc_aeropt_kinne.f90
 @@ -1,7 +1,3 @@
@@ -2696,7 +2696,7 @@ index 0e6ad102a..47f736596 100644
 +
  END MODULE mo_bc_aeropt_kinne
 diff --git a/src/atm_phy_bcs/mo_bc_aeropt_splumes.f90 b/src/atm_phy_bcs/mo_bc_aeropt_splumes.f90
-index ad271df2b..90fb12c96 100644
+index ad271df2b3..90fb12c968 100644
 --- a/src/atm_phy_bcs/mo_bc_aeropt_splumes.f90
 +++ b/src/atm_phy_bcs/mo_bc_aeropt_splumes.f90
 @@ -1,7 +1,3 @@
@@ -3499,7 +3499,7 @@ index ad271df2b..90fb12c96 100644
      CHARACTER(LEN=32)                   :: ci_length(3), cj_length(3)
      CHARACTER(LEN=1024)                 :: message1, message2
 diff --git a/src/atm_phy_nwp/mo_ecrad.f90 b/src/atm_phy_nwp/mo_ecrad.f90
-index b285f775f..514e81f17 100644
+index b285f775f9..514e81f174 100644
 --- a/src/atm_phy_nwp/mo_ecrad.f90
 +++ b/src/atm_phy_nwp/mo_ecrad.f90
 @@ -161,13 +161,17 @@ CONTAINS
@@ -3521,7 +3521,7 @@ index b285f775f..514e81f17 100644
      ENDIF
    END SUBROUTINE del_opt_ptrs
 diff --git a/src/atm_phy_nwp/mo_nwp_aerosol.f90 b/src/atm_phy_nwp/mo_nwp_aerosol.f90
-index 1b91fd2ad..b551971c0 100644
+index 1b91fd2ad8..e13aa84186 100644
 --- a/src/atm_phy_nwp/mo_nwp_aerosol.f90
 +++ b/src/atm_phy_nwp/mo_nwp_aerosol.f90
 @@ -36,7 +36,7 @@ MODULE mo_nwp_aerosol
@@ -3609,7 +3609,7 @@ index 1b91fd2ad..b551971c0 100644
          IF(istat /= SUCCESS) &
            &  CALL finish(routine, 'Allocation of od_lw, od_sw, ssa_sw, g_sw failed')
  
-@@ -413,7 +408,8 @@ CONTAINS
+@@ -413,22 +408,27 @@ CONTAINS
              &                    pt_patch%id, jb, i_startidx, i_endidx, pt_patch%nlev, &
              &                    nbands_lw, nbands_sw, wavenum1_sw(:), wavenum2_sw(:), &
              &                    od_lw(:,:,jb,:), od_sw(:,:,jb,:),                     &
@@ -3618,8 +3618,11 @@ index 1b91fd2ad..b551971c0 100644
 +            &                    lacc=lzacc)
  
            IF ( atm_phy_nwp_config(pt_patch%id)%lscale_cdnc ) THEN
++#ifdef _OPENACC
++            IF (lzacc) CALL finish(routine, "lscale_cdnc not ported to OpenACC.")
++#endif
              prm_diag%cloud_num_fac(:,jb) = cloud_num_fac(:)
-@@ -421,14 +417,15 @@ CONTAINS
+           ENDIF
  
            IF ( var_in_output(jg)%aod_550nm ) THEN
              CALL calc_aod550_kinne(i_startidx, i_endidx, pt_patch%nlev, od_sw(:,:,jb,10), &
@@ -3638,7 +3641,7 @@ index 1b91fd2ad..b551971c0 100644
            ENDIF
  
          END DO
-@@ -438,15 +435,12 @@ CONTAINS
+@@ -438,15 +438,12 @@ CONTAINS
        ! CAMS climatology/forecasted aerosols
        CASE(iRadAeroCAMSclim,iRadAeroCAMStd)
  
@@ -3660,7 +3663,7 @@ index 1b91fd2ad..b551971c0 100644
  
          rl_start   = grf_bdywidth_c+1
          rl_end     = min_rlcell_int
-@@ -535,17 +529,22 @@ CONTAINS
+@@ -535,17 +532,22 @@ CONTAINS
      ! 10th band range (442 - 625nm) is used to output aod_550 nm
      ! due to a lack of spectrally resolved information for a particular wavelength
  
@@ -3684,7 +3687,7 @@ index 1b91fd2ad..b551971c0 100644
  
    END SUBROUTINE calc_aod550_kinne
  
-@@ -586,7 +585,7 @@ CONTAINS
+@@ -586,7 +588,7 @@ CONTAINS
    !---------------------------------------------------------------------------------------
    SUBROUTINE nwp_aerosol_kinne(mtime_datetime, zf, zh, dz, jg, jb, i_startidx, i_endidx, nlev, &
      &                          nbands_lw, nbands_sw, wavenum1_sw, wavenum2_sw,     &
@@ -3693,7 +3696,7 @@ index 1b91fd2ad..b551971c0 100644
      TYPE(datetime), POINTER, INTENT(in) :: &
        &  mtime_datetime                      !< Current datetime
      REAL(wp), INTENT(in) ::                &
-@@ -616,12 +615,42 @@ CONTAINS
+@@ -616,12 +618,40 @@ CONTAINS
        &  x_cdnc(nproma),                   & !< Scale factor for Cloud Droplet Number Concentration
        &  x_cdnc_ref(nproma)                  !< x_cdnc for the reference year 2005
      INTEGER ::                             &
@@ -3706,9 +3709,7 @@ index 1b91fd2ad..b551971c0 100644
 +
 +    CALL set_acc_host_or_device(lzacc, lacc)
 +
-+    !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) &
-+    !$ACC   CREATE(x_cdnc_ref, cloud_num_fac) IF(lzacc)
-+
++    !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) IF(lzacc)
 +
 +    !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
 +    !$ACC LOOP SEQ
@@ -3741,7 +3742,7 @@ index 1b91fd2ad..b551971c0 100644
  
      ! Tropospheric Kinne aerosol
      IF (ANY( irad_aero == (/iRadAeroConstKinne,iRadAeroKinne,iRadAeroKinneVolc, &
-@@ -629,15 +658,15 @@ CONTAINS
+@@ -629,21 +659,24 @@ CONTAINS
        CALL set_bc_aeropt_kinne(mtime_datetime, jg, i_startidx, i_endidx, nproma, nlev, jb, &
          &                      nbands_sw, nbands_lw, zf(:,:), dz(:,:),            &
          &                      od_sw_vr(:,:,:), ssa_sw_vr(:,:,:),                 &
@@ -3762,15 +3763,16 @@ index 1b91fd2ad..b551971c0 100644
      END IF
  
      ! Simple plumes
-@@ -652,36 +681,58 @@ CONTAINS
-           &                        zf(:,:), dz(:,:), zh(:,nlev+1),     &
-           &                        wavenum1_sw(:), wavenum2_sw(:),     &
-           &                        od_sw_vr(:,:,:), ssa_sw_vr(:,:,:),  &
--          &                        g_sw_vr (:,:,:), x_cdnc_ref(:)     )
-+          &                        g_sw_vr (:,:,:), x_cdnc_ref(:), lacc=lzacc )
+     IF (ANY( irad_aero == (/iRadAeroKinneVolcSP,iRadAeroKinneSP/) )) THEN
  
-         CALL deallocateDatetime(mtime_2005)
-       END IF
+       IF (atm_phy_nwp_config(jg)%lscale_cdnc) THEN
++#ifdef _OPENACC
++        CALL finish(routine, "lscale_cdnc not ported to OpenACC.")
++#endif
+         ! get x_cdnc_ref; the simple plume scheme uses 2005 as reference year
+         mtime_2005 => newDatetime(mtime_datetime)
+         mtime_2005%date%year = 2005
+@@ -659,12 +692,16 @@ CONTAINS
  
        CALL add_bc_aeropt_splumes(jg, i_startidx, i_endidx, nproma, nlev, jb,  &
          &                        nbands_sw, mtime_datetime,          &
@@ -3785,16 +3787,13 @@ index 1b91fd2ad..b551971c0 100644
 +        &                        lacc=lzacc                          )
  
        IF (atm_phy_nwp_config(jg)%lscale_cdnc) THEN
++#ifdef _OPENACC
++        CALL finish(routine, "lscale_cdnc not ported to OpenACC.")
++#endif
          ! apply scaling with safety limits:
-+        !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
-+        !$ACC LOOP GANG(STATIC: 1) VECTOR
          DO jc = i_startidx, i_endidx
            cloud_num_fac(jc) = x_cdnc(jc) / MAX(1e-6_wp, x_cdnc_ref(jc))
-           cloud_num_fac(jc) = MIN(MAX(0.1_wp, cloud_num_fac(jc)),3._wp)
-         END DO
--
-+        !$ACC END PARALLEL
-       END IF
+@@ -675,13 +712,32 @@ CONTAINS
  
      END IF
  
@@ -3832,7 +3831,7 @@ index 1b91fd2ad..b551971c0 100644
  
    END SUBROUTINE nwp_aerosol_kinne
  
-@@ -1175,31 +1226,71 @@ CONTAINS
+@@ -1175,31 +1231,71 @@ CONTAINS
    END SUBROUTINE get_time_intp_weights
  
    !---------------------------------------------------------------------------------------
@@ -3905,13 +3904,13 @@ index 1b91fd2ad..b551971c0 100644
        DEALLOCATE(g_sw, STAT=istat)
        IF(istat /= SUCCESS) CALL finish(routine, 'Deallocation of g_sw failed.')
      ENDIF
-@@ -1207,4 +1298,3 @@ CONTAINS
+@@ -1207,4 +1303,3 @@ CONTAINS
    END SUBROUTINE nwp_aerosol_cleanup
  
  END MODULE mo_nwp_aerosol
 -
 diff --git a/src/atm_phy_nwp/mo_nwp_diagnosis.f90 b/src/atm_phy_nwp/mo_nwp_diagnosis.f90
-index 3e5a408a1..7f9e08d10 100644
+index 3e5a408a1c..7f9e08d108 100644
 --- a/src/atm_phy_nwp/mo_nwp_diagnosis.f90
 +++ b/src/atm_phy_nwp/mo_nwp_diagnosis.f90
 @@ -1432,8 +1432,8 @@ CONTAINS
@@ -3959,7 +3958,7 @@ index 3e5a408a1..7f9e08d10 100644
  
  
 diff --git a/src/atm_phy_nwp/mo_nwp_ecrad_init.f90 b/src/atm_phy_nwp/mo_nwp_ecrad_init.f90
-index 262d49324..1803c213a 100644
+index 262d493240..1803c213a9 100644
 --- a/src/atm_phy_nwp/mo_nwp_ecrad_init.f90
 +++ b/src/atm_phy_nwp/mo_nwp_ecrad_init.f90
 @@ -7,11 +7,8 @@
@@ -4270,7 +4269,7 @@ index 262d49324..1803c213a 100644
      ENDIF
  
 diff --git a/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90 b/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90
-index f67e89d75..63857bff0 100644
+index f67e89d753..63857bff03 100644
 --- a/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90
 +++ b/src/atm_phy_nwp/mo_nwp_ecrad_interface.f90
 @@ -115,17 +115,16 @@ CONTAINS
@@ -4731,7 +4730,7 @@ index f67e89d75..63857bff0 100644
      CALL input_extra_2D%destruct()
      CALL input_extra_reff%destruct()
 diff --git a/src/atm_phy_nwp/mo_nwp_ecrad_prep_aerosol.f90 b/src/atm_phy_nwp/mo_nwp_ecrad_prep_aerosol.f90
-index f569b297f..05cf372f3 100644
+index f569b297f2..05cf372f33 100644
 --- a/src/atm_phy_nwp/mo_nwp_ecrad_prep_aerosol.f90
 +++ b/src/atm_phy_nwp/mo_nwp_ecrad_prep_aerosol.f90
 @@ -83,13 +83,14 @@ CONTAINS
@@ -4871,7 +4870,7 @@ index f569b297f..05cf372f3 100644
    !---------------------------------------------------------------------------------------
  
 diff --git a/src/atm_phy_nwp/mo_nwp_gpu_util.f90 b/src/atm_phy_nwp/mo_nwp_gpu_util.f90
-index 6d4c457f2..132955795 100644
+index 6d4c457f20..1329557954 100644
 --- a/src/atm_phy_nwp/mo_nwp_gpu_util.f90
 +++ b/src/atm_phy_nwp/mo_nwp_gpu_util.f90
 @@ -63,7 +63,7 @@ MODULE mo_nwp_gpu_util
@@ -4893,7 +4892,7 @@ index 6d4c457f2..132955795 100644
  
      !$ACC UPDATE DEVICE(p_int%lsq_high, p_int%lsq_lin) &
 diff --git a/src/atm_phy_nwp/mo_nwp_gscp_interface.f90 b/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
-index 5dc76a28a..30d7c96f7 100644
+index 5dc76a28a5..30d7c96f71 100644
 --- a/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
 +++ b/src/atm_phy_nwp/mo_nwp_gscp_interface.f90
 @@ -319,9 +319,12 @@ CONTAINS
@@ -4910,7 +4909,7 @@ index 5dc76a28a..30d7c96f7 100644
          ELSE
  
 diff --git a/src/atm_phy_nwp/mo_nwp_phy_init.f90 b/src/atm_phy_nwp/mo_nwp_phy_init.f90
-index 50454c61e..c06e58cb2 100644
+index 50454c61ed..c06e58cb28 100644
 --- a/src/atm_phy_nwp/mo_nwp_phy_init.f90
 +++ b/src/atm_phy_nwp/mo_nwp_phy_init.f90
 @@ -955,7 +955,7 @@ SUBROUTINE init_nwp_phy ( p_patch, p_metrics,             &
@@ -4923,7 +4922,7 @@ index 50454c61e..c06e58cb2 100644
            ! Setup Tegen aerosol needs to be done only once for all domains
            IF (irad_aero == iRadAeroTegen .OR. irad_aero == iRadAeroART) THEN
 diff --git a/src/atm_phy_nwp/mo_nwp_phy_state.f90 b/src/atm_phy_nwp/mo_nwp_phy_state.f90
-index a93b50c38..99b1b0028 100644
+index a93b50c38d..99b1b0028d 100644
 --- a/src/atm_phy_nwp/mo_nwp_phy_state.f90
 +++ b/src/atm_phy_nwp/mo_nwp_phy_state.f90
 @@ -1253,18 +1253,13 @@ SUBROUTINE new_nwp_phy_diag_list( k_jg, klev, klevp1, kblks,    &
@@ -4958,7 +4957,7 @@ index a93b50c38..99b1b0028 100644
      ENDIF  ! var_in_output
  
 diff --git a/src/atm_phy_nwp/mo_nwp_rad_interface.f90 b/src/atm_phy_nwp/mo_nwp_rad_interface.f90
-index 8e7268733..b4a3d7f0c 100644
+index 8e72687332..b4a3d7f0c1 100644
 --- a/src/atm_phy_nwp/mo_nwp_rad_interface.f90
 +++ b/src/atm_phy_nwp/mo_nwp_rad_interface.f90
 @@ -50,11 +50,10 @@ MODULE mo_nwp_rad_interface
@@ -5051,7 +5050,7 @@ index 8e7268733..b4a3d7f0c 100644
    END SUBROUTINE nwp_radiation
  
 diff --git a/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90 b/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90
-index ecdae3081..65506bfa1 100644
+index ecdae30813..65506bfa11 100644
 --- a/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90
 +++ b/src/atm_phy_nwp/mo_nwp_rrtm_interface.f90
 @@ -26,7 +26,7 @@ MODULE mo_nwp_rrtm_interface
@@ -5390,7 +5389,7 @@ index ecdae3081..65506bfa1 100644
        CALL input_extra_flds%destruct()
        CALL input_extra_2D%destruct()
 diff --git a/src/atm_phy_nwp/mo_nwp_vdiff_sea.f90 b/src/atm_phy_nwp/mo_nwp_vdiff_sea.f90
-index 7e317b642..47007452f 100644
+index 7e317b6421..47007452fb 100644
 --- a/src/atm_phy_nwp/mo_nwp_vdiff_sea.f90
 +++ b/src/atm_phy_nwp/mo_nwp_vdiff_sea.f90
 @@ -901,6 +901,8 @@ CONTAINS
@@ -5403,7 +5402,7 @@ index 7e317b642..47007452f 100644
  
    !>
 diff --git a/src/atm_phy_nwp/mo_phys_nest_utilities.f90 b/src/atm_phy_nwp/mo_phys_nest_utilities.f90
-index ee40a1f4f..4d9786786 100644
+index ee40a1f4f0..4d97867867 100644
 --- a/src/atm_phy_nwp/mo_phys_nest_utilities.f90
 +++ b/src/atm_phy_nwp/mo_phys_nest_utilities.f90
 @@ -199,11 +199,10 @@ SUBROUTINE upscale_rad_input(jg, jgp, nlev_rg, emis_rad,                   &
@@ -5615,7 +5614,7 @@ index ee40a1f4f..4d9786786 100644
      IF ( l_upsc_reff ) THEN
        !$ACC EXIT DATA DELETE(z_reff_liq, z_reff_frz) IF(lzacc)
 diff --git a/src/atm_phy_rte_rrtmgp/mo_rte_rrtmgp_interface.f90 b/src/atm_phy_rte_rrtmgp/mo_rte_rrtmgp_interface.f90
-index 66e940c6a..3742012c7 100644
+index 66e940c6a2..3742012c70 100644
 --- a/src/atm_phy_rte_rrtmgp/mo_rte_rrtmgp_interface.f90
 +++ b/src/atm_phy_rte_rrtmgp/mo_rte_rrtmgp_interface.f90
 @@ -16,7 +16,6 @@ MODULE mo_rte_rrtmgp_interface
@@ -5765,7 +5764,7 @@ index 66e940c6a..3742012c7 100644
  
      !$ACC DATA CREATE(source_lw%lay_source, source_lw%lev_source_inc) &
 diff --git a/src/atm_phy_schemes/mo_o3_util.f90 b/src/atm_phy_schemes/mo_o3_util.f90
-index 95b519d97..42abd3ac5 100644
+index 95b519d97d..42abd3ac54 100644
 --- a/src/atm_phy_schemes/mo_o3_util.f90
 +++ b/src/atm_phy_schemes/mo_o3_util.f90
 @@ -191,28 +191,32 @@ CONTAINS
@@ -5814,7 +5813,7 @@ index 95b519d97..42abd3ac5 100644
          IF(istat /= SUCCESS) CALL finish(routine, 'Deallocation of zo3_timint failed')
      CASE(10)
 diff --git a/src/configure_model/mo_nml_crosscheck.f90 b/src/configure_model/mo_nml_crosscheck.f90
-index 6e8ee4c62..e30e78b1b 100644
+index 6e8ee4c62f..e30e78b1b8 100644
 --- a/src/configure_model/mo_nml_crosscheck.f90
 +++ b/src/configure_model/mo_nml_crosscheck.f90
 @@ -574,9 +574,6 @@ CONTAINS
@@ -5828,7 +5827,7 @@ index 6e8ee4c62..e30e78b1b 100644
  
      END IF
 diff --git a/src/shared/mo_idx_list.f90 b/src/shared/mo_idx_list.f90
-index fc4a24ddc..4b9914f6a 100644
+index fc4a24ddc6..4b9914f6aa 100644
 --- a/src/shared/mo_idx_list.f90
 +++ b/src/shared/mo_idx_list.f90
 @@ -131,15 +131,13 @@ CONTAINS
@@ -5867,7 +5866,7 @@ index fc4a24ddc..4b9914f6a 100644
  
  
 diff --git a/src/shared/mo_latitude_interpolation.f90 b/src/shared/mo_latitude_interpolation.f90
-index 2f815f52a..b0d4ebe17 100644
+index 2f815f52a9..b0d4ebe17f 100644
 --- a/src/shared/mo_latitude_interpolation.f90
 +++ b/src/shared/mo_latitude_interpolation.f90
 @@ -26,6 +26,7 @@ MODULE mo_latitude_interpolation
