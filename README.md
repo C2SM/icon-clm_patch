@@ -22,7 +22,7 @@ git commit -m "GPU patch for ICON-CLM (until end of 2024)"
 # Apply custom manual patch
 git apply ../icon-clm_2024.07_cdnc.patch
 git add .
-git commit -m "Custom GPU patch lscale_cdnc"
+git commit -m "Custom GPU patch for lscale_cdnc"
 
 # Combine into one final patch 
 git reset --soft HEAD~2

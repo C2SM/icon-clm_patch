@@ -1,11 +1,13 @@
-From b6b887a4c672aaf3855cc2dd386078c5433dfbef Mon Sep 17 00:00:00 2001
+From a8f994ef8d83c0f5682536a689951cb0cab7a244 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Michael=20J=C3=A4hn?= <mjaehn@ethz.ch>
-Date: Thu, 4 Sep 2025 11:47:11 +0200
+Date: Thu, 2 Oct 2025 10:16:58 +0200
 Subject: [PATCH] GPU patch for ICON-CLM (2024 + lscale_cdnc)
 
 ---
  config/dkrz/levante.cpu.nvhpc-22.5            |   2 +-
  config/dkrz/levante.gpu.nvhpc-22.5            |   2 +-
+ icon-clm_2024.07_cdnc.patch                   |  86 ++
+ patch2.patch                                  |  43 +
  run/checksuite.clm/clmexp.ICON_CLM            | 818 +++++++++---------
  .../check.c2sm_clm_r13b03_seaice              |  30 +-
  run/checksuite.icon-dev/icon-dev.checksuite   |  31 +-
@@ -23,7 +25,7 @@ Subject: [PATCH] GPU patch for ICON-CLM (2024 + lscale_cdnc)
  src/atm_phy_bcs/mo_bc_aeropt_kinne.f90        | 376 ++++----
  src/atm_phy_bcs/mo_bc_aeropt_splumes.f90      | 561 +++++++-----
  src/atm_phy_nwp/mo_ecrad.f90                  |   4 +
- src/atm_phy_nwp/mo_nwp_aerosol.f90            | 200 +++--
+ src/atm_phy_nwp/mo_nwp_aerosol.f90            | 209 +++--
  src/atm_phy_nwp/mo_nwp_diagnosis.f90          |  18 +-
  src/atm_phy_nwp/mo_nwp_ecrad_init.f90         | 153 ++--
  src/atm_phy_nwp/mo_nwp_ecrad_interface.f90    | 230 ++---
@@ -41,7 +43,9 @@ Subject: [PATCH] GPU patch for ICON-CLM (2024 + lscale_cdnc)
  src/configure_model/mo_nml_crosscheck.f90     |   3 -
  src/shared/mo_idx_list.f90                    |  10 +-
  src/shared/mo_latitude_interpolation.f90      |  35 +-
- 37 files changed, 2188 insertions(+), 1529 deletions(-)
+ 39 files changed, 2325 insertions(+), 1530 deletions(-)
+ create mode 100644 icon-clm_2024.07_cdnc.patch
+ create mode 100644 patch2.patch
  create mode 100644 run/tolerance/pp.collect_selected_members
  create mode 100644 scripts/experiments/c2sm/clm_experiments.yml
  create mode 100644 scripts/experiments/c2sm/clm_tests.yml
@@ -73,6 +77,147 @@ index c286d6a4e..aca6b11b9 100755
  
  # The compiler fails one of the YAC configure-time tests, which we suppress and
  # hope for the best:
+diff --git a/icon-clm_2024.07_cdnc.patch b/icon-clm_2024.07_cdnc.patch
+new file mode 100644
+index 000000000..fcd4f7fea
+--- /dev/null
++++ b/icon-clm_2024.07_cdnc.patch
+@@ -0,0 +1,86 @@
++diff --git a/src/atm_phy_nwp/mo_nwp_aerosol.f90 b/src/atm_phy_nwp/mo_nwp_aerosol.f90
++index e13aa8418..01af92be3 100644
++--- a/src/atm_phy_nwp/mo_nwp_aerosol.f90
+++++ b/src/atm_phy_nwp/mo_nwp_aerosol.f90
++@@ -365,6 +365,7 @@ CONTAINS
++ ! Kinne aerosol
++ !---------------------------------------------------------------------------------------
++       CASE(iRadAeroConstKinne, iRadAeroKinne, iRadAeroVolc, iRadAeroKinneVolc, iRadAeroKinneVolcSP, iRadAeroKinneSP)
+++        !$ACC DATA CREATE(cloud_num_fac) IF(lzacc)
++ 
++         rl_start   = grf_bdywidth_c-1
++         rl_end     = min_rlcell_int
++@@ -412,10 +413,10 @@ CONTAINS
++             &                    lacc=lzacc)
++ 
++           IF ( atm_phy_nwp_config(pt_patch%id)%lscale_cdnc ) THEN
++-#ifdef _OPENACC
++-            IF (lzacc) CALL finish(routine, "lscale_cdnc not ported to OpenACC.")
++-#endif
++-            prm_diag%cloud_num_fac(:,jb) = cloud_num_fac(:)
+++            !$ACC UPDATE HOST(cloud_num_fac(i_startidx:i_endidx)) IF(lzacc)
+++            DO jc = i_startidx,i_endidx
+++              prm_diag%cloud_num_fac(jc,jb) = cloud_num_fac(jc)
+++            ENDDO
++           ENDIF
++ 
++           IF ( var_in_output(jg)%aod_550nm ) THEN
++@@ -435,6 +436,9 @@ CONTAINS
++ !$OMP END DO NOWAIT
++ !$OMP END PARALLEL
++ 
+++        !$ACC WAIT
+++        !$ACC END DATA
+++
++       ! CAMS climatology/forecasted aerosols
++       CASE(iRadAeroCAMSclim,iRadAeroCAMStd)
++ 
++@@ -626,7 +630,9 @@ CONTAINS
++ 
++     CALL set_acc_host_or_device(lzacc, lacc)
++ 
++-    !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) IF(lzacc)
+++    !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) &
+++    !$ACC   CREATE(x_cdnc_ref) IF(lzacc)
+++
++ 
++     !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
++     !$ACC LOOP SEQ
++@@ -674,9 +680,6 @@ CONTAINS
++     IF (ANY( irad_aero == (/iRadAeroKinneVolcSP,iRadAeroKinneSP/) )) THEN
++ 
++       IF (atm_phy_nwp_config(jg)%lscale_cdnc) THEN
++-#ifdef _OPENACC
++-        CALL finish(routine, "lscale_cdnc not ported to OpenACC.")
++-#endif
++         ! get x_cdnc_ref; the simple plume scheme uses 2005 as reference year
++         mtime_2005 => newDatetime(mtime_datetime)
++         mtime_2005%date%year = 2005
++@@ -685,7 +688,7 @@ CONTAINS
++           &                        zf(:,:), dz(:,:), zh(:,nlev+1),     &
++           &                        wavenum1_sw(:), wavenum2_sw(:),     &
++           &                        od_sw_vr(:,:,:), ssa_sw_vr(:,:,:),  &
++-          &                        g_sw_vr (:,:,:), x_cdnc_ref(:)     )
+++          &                        g_sw_vr (:,:,:), x_cdnc_ref(:), lacc=lzacc )
++ 
++         CALL deallocateDatetime(mtime_2005)
++       END IF
++@@ -699,15 +702,14 @@ CONTAINS
++         &                        lacc=lzacc                          )
++ 
++       IF (atm_phy_nwp_config(jg)%lscale_cdnc) THEN
++-#ifdef _OPENACC
++-        CALL finish(routine, "lscale_cdnc not ported to OpenACC.")
++-#endif
++         ! apply scaling with safety limits:
+++        !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
+++        !$ACC LOOP GANG(STATIC: 1) VECTOR
++         DO jc = i_startidx, i_endidx
++           cloud_num_fac(jc) = x_cdnc(jc) / MAX(1e-6_wp, x_cdnc_ref(jc))
++           cloud_num_fac(jc) = MIN(MAX(0.1_wp, cloud_num_fac(jc)),3._wp)
++         END DO
++-
+++        !$ACC END PARALLEL
++       END IF
++ 
++     END IF
+diff --git a/patch2.patch b/patch2.patch
+new file mode 100644
+index 000000000..0231fb480
+--- /dev/null
++++ b/patch2.patch
+@@ -0,0 +1,43 @@
++diff --git a/src/atm_phy_nwp/mo_nwp_aerosol.f90 b/src/atm_phy_nwp/mo_nwp_aerosol.f90
++index b551971..01af92b 100644
++--- a/src/atm_phy_nwp/mo_nwp_aerosol.f90
+++++ b/src/atm_phy_nwp/mo_nwp_aerosol.f90
++@@ -365,6 +365,7 @@ CONTAINS
++ ! Kinne aerosol
++ !---------------------------------------------------------------------------------------
++       CASE(iRadAeroConstKinne, iRadAeroKinne, iRadAeroVolc, iRadAeroKinneVolc, iRadAeroKinneVolcSP, iRadAeroKinneSP)
+++        !$ACC DATA CREATE(cloud_num_fac) IF(lzacc)
++ 
++         rl_start   = grf_bdywidth_c-1
++         rl_end     = min_rlcell_int
++@@ -412,7 +413,10 @@ CONTAINS
++             &                    lacc=lzacc)
++ 
++           IF ( atm_phy_nwp_config(pt_patch%id)%lscale_cdnc ) THEN
++-            prm_diag%cloud_num_fac(:,jb) = cloud_num_fac(:)
+++            !$ACC UPDATE HOST(cloud_num_fac(i_startidx:i_endidx)) IF(lzacc)
+++            DO jc = i_startidx,i_endidx
+++              prm_diag%cloud_num_fac(jc,jb) = cloud_num_fac(jc)
+++            ENDDO
++           ENDIF
++ 
++           IF ( var_in_output(jg)%aod_550nm ) THEN
++@@ -432,6 +436,9 @@ CONTAINS
++ !$OMP END DO NOWAIT
++ !$OMP END PARALLEL
++ 
+++        !$ACC WAIT
+++        !$ACC END DATA
+++
++       ! CAMS climatology/forecasted aerosols
++       CASE(iRadAeroCAMSclim,iRadAeroCAMStd)
++ 
++@@ -624,7 +631,7 @@ CONTAINS
++     CALL set_acc_host_or_device(lzacc, lacc)
++ 
++     !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) &
++-    !$ACC   CREATE(x_cdnc_ref, cloud_num_fac) IF(lzacc)
+++    !$ACC   CREATE(x_cdnc_ref) IF(lzacc)
++ 
++ 
++     !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
 diff --git a/run/checksuite.clm/clmexp.ICON_CLM b/run/checksuite.clm/clmexp.ICON_CLM
 index 44331342d..8cd311418 100644
 --- a/run/checksuite.clm/clmexp.ICON_CLM
@@ -3521,7 +3666,7 @@ index b285f775f..514e81f17 100644
      ENDIF
    END SUBROUTINE del_opt_ptrs
 diff --git a/src/atm_phy_nwp/mo_nwp_aerosol.f90 b/src/atm_phy_nwp/mo_nwp_aerosol.f90
-index 1b91fd2ad..b551971c0 100644
+index 1b91fd2ad..01af92be3 100644
 --- a/src/atm_phy_nwp/mo_nwp_aerosol.f90
 +++ b/src/atm_phy_nwp/mo_nwp_aerosol.f90
 @@ -36,7 +36,7 @@ MODULE mo_nwp_aerosol
@@ -3574,10 +3719,11 @@ index 1b91fd2ad..b551971c0 100644
            ENDDO
            !$ACC END PARALLEL
          ENDDO
-@@ -359,16 +366,6 @@ CONTAINS
+@@ -358,16 +365,7 @@ CONTAINS
+ ! Kinne aerosol
  !---------------------------------------------------------------------------------------
        CASE(iRadAeroConstKinne, iRadAeroKinne, iRadAeroVolc, iRadAeroKinneVolc, iRadAeroKinneVolcSP, iRadAeroKinneSP)
- 
+-
 -!$OMP PARALLEL
 -        ! These Tegen climatological aerosol fields are not used here but need to be initialized
 -        ! to avoid runtime error in the upscaling to the reduced radiation grid (upscale_rad_input)
@@ -3587,11 +3733,11 @@ index 1b91fd2ad..b551971c0 100644
 -        CALL init(zaeq4(:,:,:), lacc=.FALSE.)
 -        CALL init(zaeq5(:,:,:), lacc=.FALSE.)
 -!$OMP END PARALLEL
--
++        !$ACC DATA CREATE(cloud_num_fac) IF(lzacc)
+ 
          rl_start   = grf_bdywidth_c-1
          rl_end     = min_rlcell_int
-         i_startblk = pt_patch%cells%start_block(rl_start)
-@@ -384,9 +381,6 @@ CONTAINS
+@@ -384,9 +382,6 @@ CONTAINS
          WRITE(message_text,'(a,i2,a)') 'irad_aero = ', irad_aero,' requires to compile with --enable-ecrad.'
          CALL finish(routine, message_text)
  #endif
@@ -3601,7 +3747,7 @@ index 1b91fd2ad..b551971c0 100644
  
          ! Update Kinne aerosol from files once per day
          CALL nwp_aerosol_daily_update_kinne(mtime_datetime, pt_patch, dt_rad, inwp_radiation, &
-@@ -398,6 +392,7 @@ CONTAINS
+@@ -398,6 +393,7 @@ CONTAINS
            &      ssa_sw(nproma,pt_patch%nlev,pt_patch%nblks_c,nbands_sw)  , &
            &      g_sw  (nproma,pt_patch%nlev,pt_patch%nblks_c,nbands_sw)  , &
            &      STAT=istat)
@@ -3609,7 +3755,7 @@ index 1b91fd2ad..b551971c0 100644
          IF(istat /= SUCCESS) &
            &  CALL finish(routine, 'Allocation of od_lw, od_sw, ssa_sw, g_sw failed')
  
-@@ -413,7 +408,8 @@ CONTAINS
+@@ -413,40 +409,45 @@ CONTAINS
              &                    pt_patch%id, jb, i_startidx, i_endidx, pt_patch%nlev, &
              &                    nbands_lw, nbands_sw, wavenum1_sw(:), wavenum2_sw(:), &
              &                    od_lw(:,:,jb,:), od_sw(:,:,jb,:),                     &
@@ -3618,8 +3764,12 @@ index 1b91fd2ad..b551971c0 100644
 +            &                    lacc=lzacc)
  
            IF ( atm_phy_nwp_config(pt_patch%id)%lscale_cdnc ) THEN
-             prm_diag%cloud_num_fac(:,jb) = cloud_num_fac(:)
-@@ -421,14 +417,15 @@ CONTAINS
+-            prm_diag%cloud_num_fac(:,jb) = cloud_num_fac(:)
++            !$ACC UPDATE HOST(cloud_num_fac(i_startidx:i_endidx)) IF(lzacc)
++            DO jc = i_startidx,i_endidx
++              prm_diag%cloud_num_fac(jc,jb) = cloud_num_fac(jc)
++            ENDDO
+           ENDIF
  
            IF ( var_in_output(jg)%aod_550nm ) THEN
              CALL calc_aod550_kinne(i_startidx, i_endidx, pt_patch%nlev, od_sw(:,:,jb,10), &
@@ -3638,7 +3788,12 @@ index 1b91fd2ad..b551971c0 100644
            ENDIF
  
          END DO
-@@ -438,15 +435,12 @@ CONTAINS
+ !$OMP END DO NOWAIT
+ !$OMP END PARALLEL
+ 
++        !$ACC WAIT
++        !$ACC END DATA
++
        ! CAMS climatology/forecasted aerosols
        CASE(iRadAeroCAMSclim,iRadAeroCAMStd)
  
@@ -3660,7 +3815,7 @@ index 1b91fd2ad..b551971c0 100644
  
          rl_start   = grf_bdywidth_c+1
          rl_end     = min_rlcell_int
-@@ -535,17 +529,22 @@ CONTAINS
+@@ -535,17 +536,22 @@ CONTAINS
      ! 10th band range (442 - 625nm) is used to output aod_550 nm
      ! due to a lack of spectrally resolved information for a particular wavelength
  
@@ -3684,7 +3839,7 @@ index 1b91fd2ad..b551971c0 100644
  
    END SUBROUTINE calc_aod550_kinne
  
-@@ -586,7 +585,7 @@ CONTAINS
+@@ -586,7 +592,7 @@ CONTAINS
    !---------------------------------------------------------------------------------------
    SUBROUTINE nwp_aerosol_kinne(mtime_datetime, zf, zh, dz, jg, jb, i_startidx, i_endidx, nlev, &
      &                          nbands_lw, nbands_sw, wavenum1_sw, wavenum2_sw,     &
@@ -3693,7 +3848,7 @@ index 1b91fd2ad..b551971c0 100644
      TYPE(datetime), POINTER, INTENT(in) :: &
        &  mtime_datetime                      !< Current datetime
      REAL(wp), INTENT(in) ::                &
-@@ -616,12 +615,42 @@ CONTAINS
+@@ -616,12 +622,42 @@ CONTAINS
        &  x_cdnc(nproma),                   & !< Scale factor for Cloud Droplet Number Concentration
        &  x_cdnc_ref(nproma)                  !< x_cdnc for the reference year 2005
      INTEGER ::                             &
@@ -3707,7 +3862,7 @@ index 1b91fd2ad..b551971c0 100644
 +    CALL set_acc_host_or_device(lzacc, lacc)
 +
 +    !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) &
-+    !$ACC   CREATE(x_cdnc_ref, cloud_num_fac) IF(lzacc)
++    !$ACC   CREATE(x_cdnc_ref) IF(lzacc)
 +
 +
 +    !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
@@ -3741,7 +3896,7 @@ index 1b91fd2ad..b551971c0 100644
  
      ! Tropospheric Kinne aerosol
      IF (ANY( irad_aero == (/iRadAeroConstKinne,iRadAeroKinne,iRadAeroKinneVolc, &
-@@ -629,15 +658,15 @@ CONTAINS
+@@ -629,15 +665,15 @@ CONTAINS
        CALL set_bc_aeropt_kinne(mtime_datetime, jg, i_startidx, i_endidx, nproma, nlev, jb, &
          &                      nbands_sw, nbands_lw, zf(:,:), dz(:,:),            &
          &                      od_sw_vr(:,:,:), ssa_sw_vr(:,:,:),                 &
@@ -3762,7 +3917,7 @@ index 1b91fd2ad..b551971c0 100644
      END IF
  
      ! Simple plumes
-@@ -652,36 +681,58 @@ CONTAINS
+@@ -652,36 +688,58 @@ CONTAINS
            &                        zf(:,:), dz(:,:), zh(:,nlev+1),     &
            &                        wavenum1_sw(:), wavenum2_sw(:),     &
            &                        od_sw_vr(:,:,:), ssa_sw_vr(:,:,:),  &
@@ -3832,7 +3987,7 @@ index 1b91fd2ad..b551971c0 100644
  
    END SUBROUTINE nwp_aerosol_kinne
  
-@@ -1175,31 +1226,71 @@ CONTAINS
+@@ -1175,31 +1233,71 @@ CONTAINS
    END SUBROUTINE get_time_intp_weights
  
    !---------------------------------------------------------------------------------------
@@ -3905,7 +4060,7 @@ index 1b91fd2ad..b551971c0 100644
        DEALLOCATE(g_sw, STAT=istat)
        IF(istat /= SUCCESS) CALL finish(routine, 'Deallocation of g_sw failed.')
      ENDIF
-@@ -1207,4 +1298,3 @@ CONTAINS
+@@ -1207,4 +1305,3 @@ CONTAINS
    END SUBROUTINE nwp_aerosol_cleanup
  
  END MODULE mo_nwp_aerosol

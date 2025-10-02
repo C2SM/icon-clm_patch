@@ -1,38 +1,52 @@
-From 3179f07cbfc951feb0ab757548e684402ab3ead7 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Michael=20J=C3=A4hn?= <mjaehn@ethz.ch>
-Date: Thu, 4 Sep 2025 11:33:25 +0200
-Subject: [PATCH] Port lscale_cdnc to GPU
-
----
- src/atm_phy_nwp/mo_nwp_aerosol.f90 | 19 +++++++------------
- 1 file changed, 7 insertions(+), 12 deletions(-)
-
 diff --git a/src/atm_phy_nwp/mo_nwp_aerosol.f90 b/src/atm_phy_nwp/mo_nwp_aerosol.f90
-index e13aa8418..b551971c0 100644
+index e13aa8418..01af92be3 100644
 --- a/src/atm_phy_nwp/mo_nwp_aerosol.f90
 +++ b/src/atm_phy_nwp/mo_nwp_aerosol.f90
-@@ -412,9 +412,6 @@ CONTAINS
+@@ -365,6 +365,7 @@ CONTAINS
+ ! Kinne aerosol
+ !---------------------------------------------------------------------------------------
+       CASE(iRadAeroConstKinne, iRadAeroKinne, iRadAeroVolc, iRadAeroKinneVolc, iRadAeroKinneVolcSP, iRadAeroKinneSP)
++        !$ACC DATA CREATE(cloud_num_fac) IF(lzacc)
+ 
+         rl_start   = grf_bdywidth_c-1
+         rl_end     = min_rlcell_int
+@@ -412,10 +413,10 @@ CONTAINS
              &                    lacc=lzacc)
  
            IF ( atm_phy_nwp_config(pt_patch%id)%lscale_cdnc ) THEN
 -#ifdef _OPENACC
 -            IF (lzacc) CALL finish(routine, "lscale_cdnc not ported to OpenACC.")
 -#endif
-             prm_diag%cloud_num_fac(:,jb) = cloud_num_fac(:)
+-            prm_diag%cloud_num_fac(:,jb) = cloud_num_fac(:)
++            !$ACC UPDATE HOST(cloud_num_fac(i_startidx:i_endidx)) IF(lzacc)
++            DO jc = i_startidx,i_endidx
++              prm_diag%cloud_num_fac(jc,jb) = cloud_num_fac(jc)
++            ENDDO
            ENDIF
  
-@@ -626,7 +623,9 @@ CONTAINS
+           IF ( var_in_output(jg)%aod_550nm ) THEN
+@@ -435,6 +436,9 @@ CONTAINS
+ !$OMP END DO NOWAIT
+ !$OMP END PARALLEL
+ 
++        !$ACC WAIT
++        !$ACC END DATA
++
+       ! CAMS climatology/forecasted aerosols
+       CASE(iRadAeroCAMSclim,iRadAeroCAMStd)
+ 
+@@ -626,7 +630,9 @@ CONTAINS
  
      CALL set_acc_host_or_device(lzacc, lacc)
  
 -    !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) IF(lzacc)
 +    !$ACC DATA CREATE(od_lw_vr, od_sw_vr, g_sw_vr, ssa_sw_vr, x_cdnc) &
-+    !$ACC   CREATE(x_cdnc_ref, cloud_num_fac) IF(lzacc)
++    !$ACC   CREATE(x_cdnc_ref) IF(lzacc)
 +
  
      !$ACC PARALLEL DEFAULT(PRESENT) ASYNC(1) IF(lzacc)
      !$ACC LOOP SEQ
-@@ -674,9 +673,6 @@ CONTAINS
+@@ -674,9 +680,6 @@ CONTAINS
      IF (ANY( irad_aero == (/iRadAeroKinneVolcSP,iRadAeroKinneSP/) )) THEN
  
        IF (atm_phy_nwp_config(jg)%lscale_cdnc) THEN
@@ -42,7 +56,7 @@ index e13aa8418..b551971c0 100644
          ! get x_cdnc_ref; the simple plume scheme uses 2005 as reference year
          mtime_2005 => newDatetime(mtime_datetime)
          mtime_2005%date%year = 2005
-@@ -685,7 +681,7 @@ CONTAINS
+@@ -685,7 +688,7 @@ CONTAINS
            &                        zf(:,:), dz(:,:), zh(:,nlev+1),     &
            &                        wavenum1_sw(:), wavenum2_sw(:),     &
            &                        od_sw_vr(:,:,:), ssa_sw_vr(:,:,:),  &
@@ -51,7 +65,7 @@ index e13aa8418..b551971c0 100644
  
          CALL deallocateDatetime(mtime_2005)
        END IF
-@@ -699,15 +695,14 @@ CONTAINS
+@@ -699,15 +702,14 @@ CONTAINS
          &                        lacc=lzacc                          )
  
        IF (atm_phy_nwp_config(jg)%lscale_cdnc) THEN
@@ -70,6 +84,3 @@ index e13aa8418..b551971c0 100644
        END IF
  
      END IF
--- 
-2.35.3
-
