@@ -8,7 +8,18 @@ It consists of two parts:
 
 which are merged to the final patch file `icon-clm_2024.07_gpu.patch`.
 
-Thus, the code to create the whole patch is the following:
+To apply the patch, do the following:
+
+```
+git clone https://github.com/C2SM/icon-clm_patch.git
+git clone https://gitlab.dkrz.de/icon/icon-model/-/tree/release-2024.07-public?ref_type=heads
+cd icon-model
+git apply ../icon-clm_patch/icon-clm_2024.07_gpu.patch
+```
+
+## Recreating this Patch
+
+The code to create the whole patch is the following:
 
 ```
 git clone -b release-2024.07-public git@gitlab.dkrz.de:icon/icon-model.git
